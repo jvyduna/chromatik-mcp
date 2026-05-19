@@ -1,0 +1,17 @@
+# Java / Maven
+package/target/
+*.class
+
+# Node
+server/node_modules/
+server/dist/
+server/*.tsbuildinfo
+
+# Editors
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Logs
+*.log
