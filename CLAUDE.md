@@ -2,80 +2,88 @@
 
 Project context for AI assistants working in this repo. See [README.md](README.md) for the architecture and [docs/build-plan.md](docs/build-plan.md) for the PR breakdown.
 
-## Two halves
+## Shape of the project
 
-- `server/` — Node MCP server (TypeScript). Scaffolded after `/Users/danoved/Source/touchdesigner-mcp/`.
-- `package/` — Java LX package (Maven). Drop-in jar. Reference LX source at `/Users/danoved/Source/LX/`.
+A single Java package (`package/`) — drop-in LX jar (Maven). The jar embeds an HTTP MCP server inside the LX runtime, so AI clients (any MCP-speaking agentic platform — Claude Code, Claude Desktop, Cursor, Codex, custom orchestrators) connect to it directly and call tools that mutate LX state in-process. No separate Node server, no `.lxp` file editing, no file watcher.
 
-Both communicate via the filesystem: the `.lxp` project file (data plane) and `~/.lx-mcp/status.json` (handshake).
+The only filesystem touchpoint is `~/.lx-mcp/status.json`, which the plugin writes on startup so clients can discover the HTTP port.
+
+Reference LX source at `/Users/danoved/Source/LX/`. The scaffolding convention mirrors `/Users/danoved/Source/Apotheneum/` (Java 21, `com.heronarts:lx:1.2.1` as `provided`, `lx.package` JSON descriptor in `src/main/resources/` with Maven token filtering, install profile copies the jar to `~/Chromatik/Packages/`).
 
 ## Composability is the prime directive
 
-Every mutation operation lives in its own small, focused function with a narrow signature. Tool handlers compose these primitives; they do not inline mutation logic.
+Every mutation operation lives in its own small, focused Java function with a narrow signature. Tool handlers compose these primitives; they do not inline `LXCommand` construction or model edits.
 
-**Rule of thumb**: if you are about to write a tool handler that reaches into a JSON object and mutates it inline, stop. Extract a function with a name that describes the intent (`addModulator`, `setParameterValue`, `addMidiMapping`, …), put it in a module that the tool handler imports, and call it from the handler.
+**Rule of thumb**: if you are about to write a tool handler that calls `lx.command.perform(...)` directly or reaches into `lx.engine.*` to mutate it, stop. Extract a function with a name that describes the intent (`addGlobalModulator`, `setParameterValue`, `addMidiMapping`, …), put it in a `domain/` module that the tool handler imports, and call it from the handler.
 
-Why this matters here specifically: v1 backends mutate the project file on disk; v2 will hit a live HTTP endpoint on the LX side; v3 may run remote. The same primitives must be re-implementable across all three backends without changing tool handlers. If a primitive is tangled with file I/O or JSON shape, it cannot be swapped.
+Why this matters here specifically: some mutations will route through `LXCommand` (gets undo support); others will edit the in-memory model directly (where no command exists, or undo isn't worth wrapping). That choice should live inside one composable primitive per intent, not be smeared across tool handlers. If the implementation strategy for an operation changes later (e.g., a new `LXCommand` lands upstream), exactly one function needs to change.
 
 ### Layering
 
 ```
-tool handler  ──> domain operation  ──> LxClient method  ──> backend impl
-(MCP-shaped)     (intent, pure)         (interface)          (file | http | remote)
+tool handler  ──> domain primitive  ──> LXCommand.perform(...)   (mutation with undo)
+(MCP-shaped)     (intent, narrow)   ──> direct lx.engine.* edit  (mutation without undo)
+                                    ──> read lx.engine.*         (read-only)
 ```
 
-- **Tool handlers** (`server/src/features/tools/*.ts`): parse args via Zod, call domain operations, format the result. No JSON mutation. No I/O.
-- **Domain operations** (`server/src/domain/*.ts` or similar): pure functions over the in-memory project model. `addModulator(project, kind, opts) → project'`. No I/O, no async unless calling LxClient.
-- **`LxClient` interface** (`server/src/lxClient/lxClient.ts`): the swap point. Read/write project, discover, (future) call live endpoints.
-- **Backends** (`server/src/lxClient/fileBackend.ts`, future `httpBackend.ts`): the only place that knows *how* the project is persisted.
+- **Tool handlers** (`package/src/main/java/lxmcp/tools/*.java`): parse args, call a domain primitive, format the result. No `LXCommand` construction. No direct engine mutation.
+- **Domain primitives** (`package/src/main/java/lxmcp/domain/*.java`): the only place that knows how the mutation is actually applied. Each is one focused function.
+- **MCP plumbing** (`package/src/main/java/lxmcp/mcp/*.java`): server lifecycle, HTTP transport, status-file writing. Tool handlers and domain primitives never reach into MCP plumbing.
 
-### Concrete example — "update a modulator's parameter"
+### Concrete example — "add a global modulator"
 
 Bad (inline, not swappable):
-```ts
+```java
 // tool handler
-const project = JSON.parse(await fs.readFile(path, 'utf8'));
-project.engine.modulation.modulators[i].parameters[name] = value;
-await fs.writeFile(path, JSON.stringify(project));
+public Result<ModulatorInfo> handle(AddMacroKnobArgs args) {
+  lx.command.perform(new LXCommand.Modulation.AddModulator(MacroKnobs.class));
+  var mods = lx.engine.modulation.modulators;
+  return Result.ok(ModulatorInfo.from(mods.get(mods.size() - 1)));
+}
 ```
 
-Good (composed primitives, swappable):
-```ts
-// domain/modulators.ts — pure
-export function setModulatorParameter(p: LxpProject, id: number, name: string, value: ParamValue): LxpProject { ... }
-export function findModulatorById(p: LxpProject, id: number): Modulator | undefined { ... }
+Good (composed primitive, single point of swap):
+```java
+// domain/Modulators.java
+public static LXModulator addGlobalModulator(LX lx, Class<? extends LXModulator> kind) {
+  lx.command.perform(new LXCommand.Modulation.AddModulator(kind));
+  var mods = lx.engine.modulation.modulators;
+  return mods.get(mods.size() - 1);
+}
 
-// tool handler
-const project = await lxClient.readProject();
-const next = setModulatorParameter(project, id, name, value);
-await lxClient.writeProject(next);
+// tools/AddMacroKnob.java
+protected Result<ModulatorInfo> handle(AddMacroKnobArgs args) {
+  LXModulator m = Modulators.addGlobalModulator(lx, MacroKnobs.class);
+  return Result.ok(ModulatorInfo.from(m));
+}
 ```
 
-The pure primitive (`setModulatorParameter`) is reused by every tool that touches modulator parameters and is trivially unit-testable. The `LxClient` calls become single-line swaps when the HTTP backend lands.
+`addGlobalModulator` is reused by every tool that adds a global modulator (MacroKnobs, MacroSwitches, MacroTriggers, LFOs, envelopes). The handler is a one-liner with no `LXCommand` knowledge. If we ever need to swap the implementation (e.g., add validation, switch from `LXCommand` to direct edit, fan out a notification), only the primitive changes.
 
 ### When primitives multiply
 
-If three tools each need to "find the channel by id, then walk to a parameter, then set it," extract a `setParameterByPath(project, oscPath, value)` primitive. Don't duplicate. But: only extract when the third caller appears — two callers is coincidence, three is a pattern.
+If three tools each need to "find the channel by id, then walk to a parameter, then set it," extract a `setParameterByPath(lx, oscPath, value)` primitive. Don't duplicate. But: only extract when the third caller appears — two callers is coincidence, three is a pattern.
 
 ### What this does **not** mean
 
-- Don't pre-build abstraction layers that aren't used. No factories, registries, or strategy patterns until two real implementations exist.
-- Don't wrap every two-line operation in a function. Composability is about *mutation primitives* and *I/O seams* — not formatting helpers or one-shot string assembly.
-- Don't introduce dependency injection containers. Plain function arguments and the existing `LxClient` injection are enough.
+- Don't pre-build abstraction layers that aren't used. No factories, registries, or strategy interfaces until two real implementations exist.
+- Don't wrap every two-line operation in a function. Composability is about *mutation primitives* — not formatting helpers or one-shot string assembly.
+- Don't introduce dependency injection containers. Plain static methods plus the `LX` reference passed at server-start time are enough.
 
 ## Code style
 
-- TypeScript: strict mode, ESM, no `any`. Result-shaped errors (`{ success: true; data } | { success: false; error }`) at handler boundaries — see touchdesigner-mcp for the pattern.
-- Java: standard Maven layout, target the LX version pinned in `lx.package`. Keep modulator lifecycle clean — register/unregister listeners symmetrically.
+- Java: standard Maven layout, target the LX version pinned in `lx.package`. Keep modulator/plugin lifecycle clean — register/unregister listeners symmetrically.
+- Result-shaped errors at tool boundaries — return a tagged `Result<T>` (or equivalent sealed type) rather than throwing across the MCP handler boundary. Map exceptions to `Result.error(...)` at the seam.
 - Comments: only when the *why* is non-obvious. Don't narrate the *what*.
-- Tests: every domain primitive gets a unit test with fixture projects. Tool handlers get an integration test (Zod schema + fileBackend against a fixture .lxp).
+- Tests: every domain primitive gets a JUnit test against a constructed `LX` instance or a fixture. Tool handlers get an integration test that exercises the MCP schema + the primitive. The detailed QA strategy lives in `docs/spike/qa-strategy.md` (produced by PR-1c).
 
 ## References
 
-- Node template: `/Users/danoved/Source/touchdesigner-mcp/` (server layout, transport, tool registration).
-- LX source: `/Users/danoved/Source/LX/` (modulator base class, package loading, project serialization).
+- LX source: `/Users/danoved/Source/LX/` (LXCommand categories, LXPlugin interface, modulator base classes, project serialization, OSC engine).
+- Apotheneum (reference plugin layout): `/Users/danoved/Source/Apotheneum/` (pom.xml, lx.package descriptor, install profile).
 - Sample project for fixtures: `/Users/danoved/Source/Apotheneum/target/classes/projects/Apotheneum-Test.lxp`.
+- Java MCP SDK: `modelcontextprotocol/java-sdk` (HTTP transport, tool registration).
 
 ## Scope guard
 
-Any PR larger than the slices in [docs/build-plan.md](docs/build-plan.md) is too big. If you find yourself touching both Java and Node in one PR (outside the PR-11 convergence demo), split it.
+Any PR larger than the slices in [docs/build-plan.md](docs/build-plan.md) is too big. The whole point of the small-PR plan is that each PR is independently demoable — if yours isn't, split it.

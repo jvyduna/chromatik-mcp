@@ -1,166 +1,146 @@
-# lx-mcp — revised build plan (Java-only, Claude Code primary)
+# lx-mcp — spike phase plan (three small PRs, each an agent pipeline)
 
 ## Context
 
-Original plan was Node + filesystem-edited `.lxp` + Java watcher (17 PRs). Feedback on the public PR from Mark Slee (LX creator) and Tracy Scott pushed two changes that collapse the architecture:
+Original plan was Node + filesystem `.lxp` editing + Java watcher (17 PRs). Feedback from Mark Slee (LX creator) and Tracy Scott collapsed it to a Java-only architecture:
 
-- **Mark**: LX already has an OSC reload (`/lx/openProject`, LXEngine.java:1370). The Java per-frame watcher is unnecessary. He also flagged the `LXCommand` API as the "right" mutation path — gives undo, never produces invalid state.
-- **Tracy**: putting MCP directly inside the LX package over HTTP avoids re-hoisting LX's runtime semantics into a parallel TypeScript model. The "swappable backend" hand-wave doesn't escape that maintenance tax — even v2 still needs TS types on the agent side.
+- MCP server lives inside the LXPlugin jar; streamable-HTTP transport; works with any MCP-speaking agentic platform (Claude Code, Claude Desktop, Cursor, Codex, custom orchestrators). No client-specific assumptions in the server.
+- Mutations go through `LXCommand` (Mark confirmed the whole API surface is one source file, organized as static inner classes — `LXCommand.Parameter.SetValue`, `LXCommand.Modulation.AddModulator`, etc.) — gives undo for free.
+- No Node, no `.lxp` editing, no file watcher, no TS mirror of LX semantics.
 
-Combined direction (Path A):
+The original "PR-1 spike" bundled five distinct deliverables (SDK feasibility, LXCommand inventory, embedding pattern, QA strategy, Phase-2 skim) under one review — too big. Split into three small spike PRs, each independently reviewable, mostly parallelizable. Each is executed by its own 4-agent pipeline (Research → Analysis → Writing → Review).
 
-- **MCP server lives inside the LXPlugin jar.** Streamable HTTP MCP transport. Single language (Java), single source of truth, no `.lxp` file editing, no watcher, no reload step.
-- **Mutations go through `LXCommand`** where the wrapper is worth it; direct model edits where it isn't. Undo stack works for free where we use LXCommand.
-- **Primary client: Claude Code, running locally.** Multi-agent fan-out (orchestrator → channel-builder / modulation-router / MIDI-mapper) comes free via Claude Code's existing Task/subagent feature. We design the tool surface to compose well; Claude Code handles the orchestration. Claude Desktop / Cursor / Codex are also-supported, not primary.
+A **PR-0 scaffold step** lands first to give the spike PRs a buildable Java project to work in.
 
-Result: ~7 PRs instead of 17. The Node track and the file-watching track disappear entirely.
+## PR-0 — Java/Maven scaffold (pre-step)
 
-## PR breakdown
+Mirrors the Apotheneum convention (`/Users/danoved/Source/Apotheneum`) so contributors familiar with one project recognize the other.
 
-### PR-1 — Spike: Java MCP SDK + LXCommand coverage
+**Files to create**:
 
-Read-only investigation, output is `docs/spike-findings.md`. Blocks everything else.
+- `package/pom.xml` — derived from `Apotheneum/pom.xml`. Standalone (no parent POM), Java 21 (`maven.compiler.release=21`), `com.heronarts:lx:1.2.1` as `provided`, resource filtering enabled for `src/main/resources/lx.package`, install profile that copies the built jar to `~/Chromatik/Packages/`. Update coordinates to `groupId=co.lxmcp`, `artifactId=lx-mcp`, `version=0.0.1-SNAPSHOT`.
+- `package/src/main/resources/lx.package` — JSON descriptor with the same `name`/`mediaDir`/`author`/`url`/`build` shape as Apotheneum. `name: "LX-MCP"`.
+- `package/src/main/java/lxmcp/LxMcpPlugin.java` — stub `implements LXPlugin` with `@LXPlugin.Name("LX-MCP")`. Empty `initialize(LX lx)`.
+- `package/.gitignore` — Maven + IDE artifacts (`target/`, `*.class`, `.settings`, `.project`, `.classpath`, `.idea/`).
 
-- Does the official Java MCP SDK (`modelcontextprotocol/java-sdk`) support streamable-HTTP transport at the maturity we need? Cite versions.
-- Can it be embedded inside another long-running JVM process (i.e., the LX runtime) without taking over main? Confirm with a 10-line embed test outside the LX package.
-- Inventory existing `LXCommand` categories — `git grep "extends LXCommand"` in the LX source. Map each planned tool to either a matching command or "needs direct model edit + document undo-skip":
-  - `add_channel`, `remove_channel`, `set_channel_param`
-  - `add_pattern`, `set_active_pattern`, `set_pattern_param`
-  - `add_modulator` (MacroKnobs / MacroSwitches / MacroTriggers / LFOs / Envelopes)
-  - `wire_modulator` (modulation source → parameter target)
-  - `add_midi_mapping`
-  - `set_parameter` (generic by OSC path)
-- Decide tool-surface granularity for multi-agent fan-out: are tools fine-grained enough that an orchestrator can compose them across subagents, or do we need a higher-level "scene" tool that wraps a sequence?
-- Decide port-discovery story: where does the AI client learn the HTTP port? `~/.lx-mcp/status.json` with `{pid, port, projectPath, lxVersion}` written on plugin init is the default.
+**Not in scope for PR-0**: no MCP SDK dependency yet (that lands as part of PR-1a once the version is pinned), no domain code, no tests beyond the build itself.
 
-**Verification**: docs review; the embed test runs and accepts an `initialize` request.
+**Execution**: small enough to skip the 4-agent pipeline. One implementer pass + user review.
 
-### PR-2 — Maven scaffolding + LXPlugin skeleton
+**Verification**:
+- `cd package && mvn package` succeeds; produces `target/lx-mcp-0.0.1-SNAPSHOT.jar`.
+- `mvn -Pinstall install` copies the jar to `~/Chromatik/Packages/`.
+- Restart Chromatik; "LX-MCP" appears in the installed-packages list. Plugin contributes nothing yet — that's expected.
 
-- `package/pom.xml` — LX as `provided`, Java MCP SDK as runtime dep, version pinned from PR-1.
-- `package/src/main/resources/lx.package` — JSON descriptor (`name`, `author`, `version`, `lxVersion`).
-- `package/src/main/java/<pkg>/LxMcpPlugin.java` — empty `LXPlugin` implementation that registers nothing yet.
-- `mvn package` produces `target/lx-mcp-*.jar`.
-- Remove the now-unused `server/` directory.
+## Spike PRs
 
-**Verification**: drop the jar in LX's packages folder, restart LX, package appears in LX's package list. No behavior yet.
+### PR-1a — Java MCP SDK feasibility (the go/no-go gate)
 
-### PR-3 — Embedded HTTP MCP server + status file
+Smallest, most consequential. If this fails, the whole architecture pivot is wrong.
 
-- On `LXPlugin.initialize(lx)`: start the Java MCP server on a free port, register zero tools.
-- Write `~/.lx-mcp/status.json` with `{pid, port, projectPath, lxVersion, mcpVersion}`. Update on project change. Delete on plugin teardown.
-- All server lifecycle owned by the plugin (no separate modulator yet — the "drop the MCP modulator to opt in" gesture can come back as a follow-up if we want explicit per-project opt-in, but it's not blocking).
+Open questions:
+- Does the official Java MCP SDK (`modelcontextprotocol/java-sdk`) support streamable-HTTP transport at the maturity we need? Which version?
+- Can the SDK be embedded inside a long-running JVM (LX) without taking over main?
+- What's the embedding pattern — the rough shape of starting the MCP server from `LXPlugin.initialize(lx)`?
+- Port discovery: confirm `~/.lx-mcp/status.json` with `{pid, port, projectPath, lxVersion}` is the right handshake.
 
-**Verification**: with LX running, `cat ~/.lx-mcp/status.json` shows the port. `claude mcp add lx --transport http http://localhost:<port>` followed by `tools/list` returns an empty list.
+Output: `docs/spike/sdk-feasibility.md` + a runnable embed test that accepts an MCP `initialize` request.
 
-### PR-4 — First tool: `get_project_info` (read-only)
+### PR-1b — LXCommand inventory + tool mapping
 
-- Read directly from `lx.engine` (no JSON parsing, no .lxp file). Return `{version, channelCount, modulatorCount, projectPath}`.
-- Establishes the tool-registration pattern: schema, domain operation, result formatter, error type.
-- Composability: the schema-extraction primitive (e.g. `summarizeProject(LX) → ProjectInfo`) is its own function, called by the tool handler, never inlined.
+Read-only investigation of LX's command surface. Independent of PR-1a.
 
-**Verification**: from Claude Code, invoke the tool, assert the response shape and values against a known project.
+Open questions:
+- Walk `heronarts/lx/command/LXCommand.java` (in the LX source repo) and enumerate every inner-class action (`LXCommand.<Category>.<Action>` + constructor signature).
+- For each planned tool (`add_channel`, `set_parameter`, `add_modulator`, `wire_modulator`, `add_midi_mapping`, etc.), map to a concrete `LXCommand` action — or "needs direct in-memory edit, document undo skip."
+- Tool granularity: do fine-grained primitives compose well for multi-agent fan-out, or do we also need a higher-level `compose_scene` tool?
+- **Phase-2 capability skim** (light, not blocking): does LX expose pattern/effect source or class metadata so a future agent could reason about pattern algorithms? Just enumerate — the tool itself waits.
 
-### PR-5 — First mutation: `add_macro_knob` via LXCommand
+Output: `docs/spike/lxcommand-mapping.md` with the mapping table front and center.
 
-- Find/use the existing `LXCommand` category for adding a global modulator (PR-1 confirms which one). Call `lx.command.perform(new LXCommand...AddModulator(MacroKnobs.class))`.
-- UI updates immediately (no reload). Undo stack records the operation.
-- Composable primitive: `addGlobalModulator(LX, Class<? extends LXModulator>) → LXModulator` — handler is a one-liner around it.
+### PR-1c — Automated QA strategy
 
-**Verification**: from Claude Code, invoke `add_macro_knob`. Knob appears live in Chromatik UI. Cmd-Z removes it. No `.lxp` file was touched on disk.
+Design doc. Mostly independent; the one dependency on PR-1b is "which tools use LXCommand-backed undo verification" — a small late edit, not a structural block. Can start in parallel.
 
-### PR-6 — Tool surface expansion (parallel sub-PRs)
+Open questions:
+- Can `LX` run headless in tests? (Check LX's own `src/test/` for existing patterns.)
+- Default per-tool test shape: domain primitive unit test + MCP-handler integration test.
+- For `LXCommand`-backed mutations: use **do → undo → assert state restored** as a built-in correctness check. Catches "did we actually use a real LXCommand?" for free.
+- For direct-edit mutations: define the fallback verification (likely state-snapshot diff + manual rollback in teardown).
+- Can the embedded HTTP MCP server be tested in-process from JUnit? (Cross-checks PR-1a's findings.)
+- What runs in CI (headless) vs. local-only (live LX)?
+- Multi-agent workflow tests: out of scope for v1, flagged for manual/recorded verification in PR-7.
 
-Each tool gets its own small PR; all depend on PR-5's pattern. Group by LXCommand category for review efficiency. Each tool is one composable domain primitive + one handler.
+Output: `docs/spike/qa-strategy.md` — concrete patterns + a verification template that PR-2 onwards fills in per-tool.
 
-- **PR-6a** — `add_channel`, `remove_channel`, `set_channel_param`
-- **PR-6b** — `add_pattern`, `set_active_pattern`, `set_pattern_param`
-- **PR-6c** — `add_modulator` (other macro types + LFOs + envelopes)
-- **PR-6d** — `wire_modulator` (modulation source → parameter target via OSC path)
-- **PR-6e** — `add_midi_mapping`, `remove_midi_mapping`, `list_midi_mappings`
-- **PR-6f** — `set_parameter` by OSC path (generic fallback)
+## Per-PR execution: 4-agent pipeline
 
-Any tool where PR-1 found no matching `LXCommand` falls back to direct in-memory model edits with an explicit note in the tool description ("does not participate in undo").
+Each spike PR runs the same pipeline. Sequential. Each agent writes one file under `docs/spike/<pr-id>/`; the next agent reads it. No other handoff state.
 
-**Verification**: per-tool, invoke from Claude Code against a fresh project, watch the UI update, verify undo where applicable.
+**1. Research Agent** (read-only; Explore-type)
+- *Reads*: the source files and external docs declared per PR (LXCommand.java for 1b, MCP Java SDK docs for 1a, LX/src/test/ for 1c, etc.).
+- *Output*: `01-research-notes.md` — raw facts and citations, no decisions.
 
-### PR-7 — Install docs + multi-agent usage examples
+**2. Analysis Agent**
+- *Reads*: research notes.
+- *Job*: produce decisions for every open question in the PR. Structured reasoning, not prose.
+- *Output*: `02-analysis.md`.
 
-- `docs/install/claude-code.md` — **primary** install path. `claude mcp add lx --transport http $(jq -r '"http://localhost:\(.port)"' ~/.lx-mcp/status.json)` or equivalent.
-- `docs/install/claude-desktop.md`, `docs/install/cursor.md`, `docs/install/codex.md` — also-supported clients, snippet each.
-- `docs/multi-agent.md` — usage doc showing how to set up Claude Code subagents on top of lx-mcp. Example: an orchestrator agent that decomposes "build a 3-channel show with one modulated parameter per channel" into specialist subagents (channel-builder, modulation-router) that each call lx-mcp tools. **No new infrastructure** — this is documentation of how Claude Code's existing Task/subagent feature composes with our tool surface.
-- Update root `README.md`: replace the Node+file-watcher architecture diagram with the in-process HTTP-MCP picture, list Claude Code as the primary client.
+**3. Writing Agent**
+- *Reads*: analysis + research notes (for citations).
+- *Job, part 1*: synthesize the canonical PR artifact (`sdk-feasibility.md` / `lxcommand-mapping.md` / `qa-strategy.md`). Scannable structure: TL;DR, the central table or test pattern, one section per remaining open question.
+- *Job, part 2 — docs sync*: audit the canonical doc set for any statement now contradicted or made stale by these findings, and produce updates. **Files to audit**: `README.md`, `CLAUDE.md`, `docs/build-plan.md`. Touch only what's stale — do not rewrite sections that are still correct. If nothing is stale, say so explicitly in the output (don't silently skip).
+- *Output*: the PR's deliverable file + any updates to the audited docs.
 
-**Verification**: a new contributor following `docs/install/claude-code.md` can run the PR-5 demo end-to-end without prior context. The multi-agent example actually works (recorded run).
+A dedicated docs-sync agent would be over-engineering at this scale (~3 canonical docs). If the docs surface grows substantially post-MVP, the audit step can be split out into its own agent then.
 
-## Dependencies and parallelism
+**4. Review Agent**
+- *Reads*: the deliverable + the PR's question list + the research notes + the diff of any audited-doc updates.
+- *Job*: independently verify every question has a defended answer; spot-check claims against research notes; flag unsourced assertions and hidden assumptions. Also verify the docs-sync audit: are the audited-doc updates accurate, and is there anything the Writing Agent missed (a stale statement in `README.md`/`CLAUDE.md`/`docs/build-plan.md` that should have been updated but wasn't)?
+- *Output*: `04-review.md` with PASS / FAIL+gaps. On FAIL, route gaps back to the appropriate upstream agent and re-run downstream.
+
+**Handoff rule**: each agent reads only its declared inputs, writes only its declared output. If a downstream agent needs information not in an upstream artifact, that's a defect in the upstream agent's scope.
+
+## Spike-phase dependencies
 
 ```
-PR-1 (spike) ──> PR-2 (scaffold) ──> PR-3 (HTTP MCP + status) ──> PR-4 (read tool) ──> PR-5 (first mutation)
-                                                                                       │
-                                                                                       ├──> PR-6a..f (parallel)
-                                                                                       │
-                                                                                       └──> PR-7 (docs)
+PR-0 (Java scaffold) ──┬──> PR-1a (SDK feasibility) ──┐
+                       │                              │
+                       │   PR-1b (LXCommand map) ─────┼──> spike-phase complete ──> downstream PRs
+                       │                              │
+                       └──> PR-1c (QA strategy) ──────┘
+                                  (small dependency on PR-1b's table)
 ```
 
-PR-1 gates everything. Once it lands, the rest is mostly a sequential critical path (PR-2 → PR-3 → PR-4 → PR-5) because each step depends on the last working. The fan-out is in PR-6 — six sub-PRs that can land in parallel, each its own small mergeable unit. PR-7 can start in parallel with PR-6 once PR-5 demos.
+PR-0 lands first — it's the minimum buildable Java project. PR-1a depends on PR-0 because its embed test needs a Maven project to live in. PR-1b and PR-1c are read-only docs; they don't strictly need PR-0, but landing it first makes their references concrete. After PR-0, PR-1a/1b/1c run in parallel.
 
-## Critical files to be created
+## Spike-phase verification
 
-- `docs/spike-findings.md` — PR-1
-- `package/pom.xml`, `package/src/main/resources/lx.package` — PR-2
-- `package/src/main/java/<pkg>/LxMcpPlugin.java` — PR-2/3
-- `package/src/main/java/<pkg>/mcp/HttpServer.java` (or similar) — PR-3
-- `package/src/main/java/<pkg>/mcp/StatusFile.java` — PR-3
-- `package/src/main/java/<pkg>/tools/GetProjectInfo.java` — PR-4
-- `package/src/main/java/<pkg>/domain/Modulators.java` — PR-5 (composable primitives)
-- `package/src/main/java/<pkg>/tools/AddMacroKnob.java` — PR-5
-- `package/src/main/java/<pkg>/tools/*` — PR-6 (one file per tool group)
-- `docs/install/claude-code.md`, `docs/multi-agent.md` — PR-7
-- `README.md` — architecture diagram + client list update (PR-7)
-- `CLAUDE.md` — needs update to drop the Node/TS code-style guidance and the touchdesigner-mcp reference (PR-2)
+- PR-0's `mvn package` builds; LX-MCP appears in Chromatik's installed packages.
+- All three spike deliverable files exist (`docs/spike/sdk-feasibility.md`, `lxcommand-mapping.md`, `qa-strategy.md`).
+- All three Review agents returned PASS.
+- The runnable embed test from PR-1a starts and accepts an MCP `initialize` request.
 
-## Composability discipline (from CLAUDE.md, restated)
+## Downstream PRs (high-level — to be planned after the spike phase)
 
-Every mutation is its own small Java function with a narrow signature. Tool handlers compose these primitives; they never inline `LXCommand` construction or model edits. Example:
+For orientation only. Each will get its own focused plan once the spike findings constrain the specifics.
 
-```java
-// domain/Modulators.java — composable primitive
-public static LXModulator addGlobalModulator(LX lx, Class<? extends LXModulator> kind) {
-  lx.command.perform(new LXCommand.Modulation.AddModulator(kind));
-  return lx.engine.modulation.modulators.get(lx.engine.modulation.modulators.size() - 1);
-}
+- **PR-2** — Embed HTTP MCP server in the plugin; write status file; `tools/list` works.
+- **PR-3** — First read-only tool (`get_project_info`). Proves the tool-registration pattern end-to-end.
+- **PR-4** — First mutation (`add_macro_knob`) via `LXCommand`. Live demo: knob appears in Chromatik, Cmd-Z undoes.
+- **PR-5** — Fan-out: parallel sub-PRs for the rest of the tool surface (channels, patterns, modulators, modulation routing, MIDI, generic `set_parameter`).
+- **PR-6** — Install docs for multiple agentic platforms + multi-agent usage examples + README rewrite.
 
-// tools/AddMacroKnob.java — handler
-public class AddMacroKnob extends Tool<AddMacroKnobArgs, ModulatorInfo> {
-  protected Result<ModulatorInfo> handle(AddMacroKnobArgs args) {
-    LXModulator m = Modulators.addGlobalModulator(lx, MacroKnobs.class);
-    return Result.ok(ModulatorInfo.from(m));
-  }
-}
+**Phase 2 (post-MVP, not in the current PR list):**
+
+- **Pattern/effect comprehension agent**: a runtime agent that reads a pattern or effect's source code to understand its algorithm, so an orchestrator can choose patterns by behavior. Requires an MCP tool that exposes pattern source / class metadata. PR-1b lightly skims LX's pattern-introspection surface so we know the tool is buildable; the tool itself waits for Phase 2.
+
+**Future ideas (not yet planned):**
+
+- **Visual-feedback agent (v2+)**: a runtime agent that grabs the current LX output and verifies the desired effect is actually happening. Requires a frame-grab tool. Captured as an idea — no PR allocation, no spike investigation.
+
 ```
-
-The primitive (`addGlobalModulator`) is reused by every tool that adds a global modulator. The tool handler is one line and contains no `LXCommand` knowledge. If we later need to swap `LXCommand` for direct model edits in some path, only the primitive changes.
-
-## Verification — end-to-end demo (PR-5)
-
-1. `mvn package` in `package/`.
-2. Drop `target/lx-mcp-*.jar` into LX's packages folder.
-3. Start LX, open any project.
-4. `cat ~/.lx-mcp/status.json` — confirm port is written.
-5. `claude mcp add lx --transport http http://localhost:<port>` in a fresh Claude Code session.
-6. Prompt: "add a macro knob to the project."
-7. Watch the MacroKnobs modulator appear in Chromatik's modulation panel within a second.
-8. In Chromatik, Cmd-Z → modulator removed.
-
-For multi-agent verification (PR-7): same setup, prompt: "build a 3-channel show: one solid pattern per channel, a macro knob wired to each channel's brightness." Claude Code's orchestrator decomposes this across subagents that each call `add_channel`, `add_pattern`, `add_modulator`, `wire_modulator`. Final result visible live in Chromatik.
-
-## What we explicitly drop from the original plan
-
-- Node server scaffolding (`server/` directory becomes unused; remove from repo in PR-2).
-- TypeScript types mirroring LX's schema.
-- `.lxp` JSON manipulation (read or write).
-- Atomic temp-write + rename of project file.
-- Java per-frame file watcher; mtime polling; echo suppression.
-- OSC `/lx/openProject` reload trigger (no longer needed — edits are in-process).
-- Claude Desktop `.mcpb` bundle as primary distribution (kept as a secondary install option in PR-7).
+PR-0 ──┬──> PR-1a ┐
+       │   PR-1b ├──> PR-2 ──> PR-3 ──> PR-4 ──┬──> PR-5 (parallel)
+       └──> PR-1c ┘                             └──> PR-6 (docs)
+```
