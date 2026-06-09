@@ -12,6 +12,23 @@ The original "PR-1 spike" bundled five distinct deliverables (SDK feasibility, L
 
 A **PR-0 scaffold step** lands first to give the spike PRs a buildable Java project to work in.
 
+## Progress tracker
+
+Sessions update this as work lands. Mark `[x]` when a PR is merged to `main`; leave a one-line note (branch / PR link / blocker) after the dash. Keep it honest — `[~]` means in-progress, `[ ]` not started.
+
+- [~] **PR-0** — Java/Maven scaffold — branch `claude/naughty-hamilton-d8e0f0`; scaffold builds, headless load gate passes
+- [ ] **PR-1a** — Java MCP SDK feasibility (go/no-go gate) —
+- [ ] **PR-1b** — LXCommand inventory + tool mapping —
+- [ ] **PR-1c** — Automated QA strategy —
+- [ ] *Spike-phase gate*: all three deliverables exist + all Review agents PASS + embed test runs —
+- [ ] **PR-2** — Embed HTTP MCP server + status file —
+- [ ] **PR-3** — First read-only tool (`get_project_info`) —
+- [ ] **PR-4** — First mutation (`add_macro_knob`) via LXCommand —
+- [ ] **PR-5** — Tool-surface fan-out (channels / patterns / modulators / routing / MIDI / set_parameter) —
+- [ ] **PR-6** — Install docs + multi-agent usage examples + README rewrite —
+
+Legend: `[ ]` not started · `[~]` in progress · `[x]` merged. When you pick up a PR, set it to `[~]` and put your branch name after the dash so parallel sessions don't collide.
+
 ## PR-0 — Java/Maven scaffold (pre-step)
 
 Mirrors the Apotheneum convention (`/Users/danoved/Source/Apotheneum`) so contributors familiar with one project recognize the other.
@@ -72,6 +89,8 @@ Open questions:
 - Multi-agent workflow tests: out of scope for v1, flagged for manual/recorded verification in PR-7.
 
 Output: `docs/spike/qa-strategy.md` — concrete patterns + a verification template that PR-2 onwards fills in per-tool.
+
+**Testability assumption + escalation rule**: the default expectation is that LX is testable from JUnit (it's a normal Java library); PR-1c's job is to confirm this and document the patterns. If PR-1c finds a real blocker — LX requires a display/GL context with no headless mode, the Java MCP SDK can't be tested in-process, etc. — that is an **architecture-level escalation**, not something the QA-strategy agent should quietly work around. The Writing Agent surfaces the blocker in `docs/spike/qa-strategy.md`'s TL;DR, and the Review Agent flags it as FAIL with the blocker description. We then re-plan before PR-2.
 
 ## Per-PR execution: 4-agent pipeline
 

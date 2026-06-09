@@ -1,12 +1,36 @@
 # lx-mcp — Java package
 
-The drop-in LX package. Ships as a single jar that LX's class loader picks up from the packages folder.
+The drop-in LX/Chromatik jar.
 
-Contains:
-- The MCP modulator (a marker modulator the user drops into a project to enable AI editing).
-- The project-file watcher (driven from the modulator's per-frame `run()` method — no engine-loop edits needed in LX).
-- The status-file writer (`~/.lx-mcp/status.json`).
+See [../docs/build-plan.md](../docs/build-plan.md) for the roadmap and [../CLAUDE.md](../CLAUDE.md) for contributor conventions.
 
-Build with `mvn package`. Drop `target/lx-mcp-*.jar` into LX's packages folder.
+**Status**: PR-0 (Maven scaffold) landed. Stub `LxMcpPlugin` only — contributes nothing yet.
 
-Not yet implemented.
+## Build & verify
+
+```sh
+# Compile gate: build the jar, confirm lx.package was token-filtered.
+scripts/verify-build.sh
+
+# Compile + headless load gate: also boot LX with no UI and confirm the
+# plugin is discovered and its initialize() runs.
+scripts/verify-build.sh --load
+```
+
+The load gate (`scripts/verify-load.sh`) runs LX headless against an isolated
+`user.home`, drops the built jar into a throwaway `Packages/` dir, force-enables
+the plugin, and greps the log for discovery (`Package:LX-MCP`) and init
+(`[LX-MCP] plugin loaded`). It never touches your real `~/Chromatik` or
+`~/LXStudio`. The harness lives in `src/test/java/lxmcp/HeadlessLoadCheck.java`
+and is not included in the shipping jar.
+
+Requires `mvn`, a JDK 21+, and `com.heronarts:lx:1.2.1` resolvable from your
+local Maven repo.
+
+## Install into Chromatik
+
+```sh
+mvn -Pinstall install   # copies the jar to ~/Chromatik/Packages/
+```
+
+Restart Chromatik; "LX-MCP" appears in the installed-packages list.
