@@ -22,9 +22,9 @@ Sessions update this as work lands. Mark `[x]` when a PR is merged to `main`; le
 - [x] **PR-1c** — Automated QA strategy — merged via [#6](https://github.com/oveddan/lx-mcp/pull/6); deliverable `docs/spike/qa-strategy.md` (LX confirmed headless-testable; do→undo→assert as built-in correctness check; engine-thread concurrency test shape). Adds `HeadlessLxHarnessTest` (executable gate) + `.github/workflows/build.yml` (CI).
 - [x] *Spike-phase gate*: all three deliverables exist + all Review agents PASS + embed test runs
 - [x] **PR-2** — Embed HTTP MCP server + status file — merged via [#7](https://github.com/oveddan/lx-mcp/pull/7); `tools/list` works, `lxmcp.engine.EngineExecutor` (engine-thread serialization, the #1-risk mechanism) + concurrency regression test landed. Jar slimming deferred — see follow-up below.
-- [~] **PR-3** — Read-only discovery tools (`get_project_info`, `list_channels`, `list_available_patterns`/`effects`/`modulators`, `get_parameter`) + wire-shape decisions — branch `pr-3-discovery-tools`; conventions recorded in `docs/tool-conventions.md`
-- [~] **PR-3b** — Path/entity resolver (`resolve(lx, path)` domain primitive; prerequisite for every path-taking mutation) — branch `pr-3b-path-resolver` (stacked on `pr-3-discovery-tools`)
-- [~] **PR-4** — First mutation (`add_macro_knob`) via LXCommand — branch `pr-4-add-macro-knob` (stacked on `pr-3b-path-resolver`)
+- [x] **PR-3** — Read-only discovery tools + wire-shape decisions — merged via [#9](https://github.com/oveddan/lx-mcp/pull/9); conventions recorded in `docs/tool-conventions.md`
+- [x] **PR-3b** — Path/entity resolver (`resolve(lx, path)` domain primitive; prerequisite for every path-taking mutation) — merged via [#12](https://github.com/oveddan/lx-mcp/pull/12) (replaced auto-closed [#10](https://github.com/oveddan/lx-mcp/pull/10)); typed failures NOT_FOUND / TYPE_MISMATCH / INVALID_PATH
+- [x] **PR-4** — First mutation (`add_macro_knob`) via LXCommand — merged via [#11](https://github.com/oveddan/lx-mcp/pull/11); also fixed the deployment blocker (SDK ServiceLoader vs Chromatik's child classloader — TCCL swap in `EmbeddedMcpServer.start`), made `verify-load.sh` deployment-faithful, and bound the server to 127.0.0.1. **Live Chromatik demo pending** (install, add_macro_knob, Cmd-Z)
 - [ ] **PR-5a** — `set_parameter` (first fan-out slice; reuses the resolver) —
 - [ ] **PR-5b** — Channels / patterns / effects tools —
 - [ ] **PR-5c** — Modulators + modulation-routing tools —
