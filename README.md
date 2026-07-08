@@ -56,4 +56,4 @@ tool handler  ──> domain primitive  ──> LXCommand.perform(...)   (mutati
 
 ## License
 
-TBD.
+[MIT](LICENSE). Note the LX framework this plugin targets is separately licensed (free for non-commercial use — see [lx.studio/license](https://lx.studio/license)); this license covers only the lx-mcp code.
