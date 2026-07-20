@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import starlightLlmsTxt from 'starlight-llms-txt';
 
 export default defineConfig({
   site: 'https://chromatik-mcp.vercel.app',
@@ -22,6 +23,15 @@ export default defineConfig({
           label: 'GitHub',
           href: 'https://github.com/oveddan/chromatik-mcp',
         },
+      ],
+      plugins: [
+        starlightLlmsTxt({
+          projectName: 'lx-mcp',
+          description:
+            'A drop-in LX/Chromatik package for AI-driven show composition over MCP.',
+          details:
+            'lx-mcp embeds an HTTP MCP server inside the LX runtime. MCP clients discover the port from ~/.lx-mcp/status.json and call tools that mutate LX state in-process.',
+        }),
       ],
       editLink: {
         baseUrl: 'https://github.com/oveddan/chromatik-mcp/edit/main/site/',
