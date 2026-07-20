@@ -42,7 +42,6 @@ export default defineConfig({
         { label: 'Usage examples', slug: 'examples' },
         { label: 'Tool reference', slug: 'tools' },
         { label: 'Architecture', slug: 'architecture' },
-        { label: 'How it was built', slug: 'how-it-was-built' },
       ],
     }),
   ],
