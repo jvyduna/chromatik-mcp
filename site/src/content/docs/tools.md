@@ -1,6 +1,6 @@
 ---
 title: Tool reference
-description: The full MCP tool surface — discovery, parameters, project persistence, structure, modulation, palette, snapshots, views, rendering, and batching.
+description: The full MCP tool surface — discovery, parameters, project persistence, structure, modulation, palette, snapshots, views, rendering, composition authoring, and batching.
 ---
 
 Everything is addressed by canonical LX path (e.g. `/lx/mixer/channel/1/fader`), as

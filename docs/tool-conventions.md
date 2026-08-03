@@ -179,6 +179,82 @@ Decided once (#108) so it isn't re-litigated per tool:
   summary-mode representative (e.g. `activePattern`) — a marker that only shows up in
   `full` is useless on a summary payload that silently omitted the same information.
 
+## Cursor wire format (composition surface)
+
+The one codec is `chromatikmcp.domain.Cursors`; every tool that takes or returns a
+timeline position goes through it (write-side schema: `Schemas.cursor`, so agents see one
+cursor vocabulary everywhere). LX has exactly two cursor constructors —
+`constructAbsoluteCursor(millis)` and `constructTempoCursor(beatCount, beatBasis)` — each
+deriving the other half of the triple from the clip's `referenceBpm`. A `Cursor` can be
+read as a full triple but never written as one, so the wire format is **asymmetric by
+necessity**:
+
+- **Read side — always the full object** `{millis, beatCount, beatBasis, formatted}`.
+  `formatted` is a display-only label in the clip's own time base (`m:ss:mmm` under
+  ABSOLUTE, 1-indexed `bars.beats[.sixteenths]` under TEMPO) — lossy by design, never
+  parsed back. Which fields are authoritative depends on the clip's `timeBase`, which is
+  emitted **once on the clip/lane/event-mutation envelope, never per-cursor**.
+- **Write side — exactly one of four forms**: `{millis}` | `{beatCount[, beatBasis]}` |
+  `{bars[, beats, sixteenths]}` (1-indexed tempo sugar, the exact inverse of the TEMPO
+  `formatLabel`, resolved against the live `beatsPerBar`; `sixteenths` is 1-4) |
+  `{at: <origin>[, offsetBeats | offsetMillis]}`. Origins: `playhead`, `insertMarker`,
+  `start`, `end`, `loopStart`, `loopEnd`, `playStart`, `playEnd`, `locator:<n>`
+  (1-indexed; compositions only). The offset is signed, one-of, and bounded at zero on
+  subtraction (LX `applyDelta` semantics). The one-of rule is enforced in
+  `Cursors.parse`, **not** in JSON Schema — the SDK validator's `oneOf` failure wording
+  is unhelpful; the parse error names the offending keys instead.
+- **Echo the clamped cursor.** `Cursors.parse` does not clamp; marker and event setters
+  clamp downstream (a point can't cross its neighboring events, markers bound to the
+  clip, Boolean lanes snap values to 0/1). So every mutation payload echoes the cursor —
+  and value — **read back from the engine after the mutation**, never the request.
+  (`set_clip_marker` additionally reports a `clamped` boolean for its absolute form.)
+
+## Positional addressing & optimistic concurrency (composition surface)
+
+- Clip-lane **events are not `LXComponent`s** and have no canonical path. The address of
+  an event is the pair `{lanePath, index}`, where `index` is the event's absolute 0-based
+  position in `lane.events`. That address — like lane paths themselves
+  (`<clipPath>/lane/<n>`, 1-based per Entity addressing) and locator indices — is
+  **positional and unstable**: any insert/remove/move shifts every later one. Every such
+  tool description carries the re-read-don't-reuse warning.
+- **Index bases differ between lanes and locators, deliberately.** Lane payload `index` is
+  0-based (`lane.getIndex()` — the same number `move_clip_lane` takes), while lane *paths*
+  use LX's 1-based array ordinal (`/lane/<n>`). Locators are **1-indexed everywhere** —
+  argument, payload `index`, path ordinal, and the `{"at": "locator:<n>"}` cursor sugar —
+  because one locator vocabulary beats two off-by-one ones (see
+  `Compositions.describeLocator`). Do not "unify" these: lane 0-basing matches the engine
+  API surface that lane mutations echo, and locator 1-basing matches every place a locator
+  is written. The rule of thumb for agents: **numbers in paths are always 1-based; a lane
+  `index` field is 0-based; a locator `index` field is 1-based.**
+- Because of that, every event mutation (a) **returns the resulting `index` + `cursor`**
+  read back from the engine — removal returns the pre-removal address, the only honest
+  echo for an event that no longer has an index — and (b) accepts an optional
+  **`atCursor` guard** (`ClipEvents.eventAt`): when provided and the event found at
+  `index` is not at that cursor, the call fails `invalid_argument` with a
+  re-read-and-retry pointer instead of silently editing the wrong event. Cheap optimistic
+  concurrency; today that's `set_automation_point`, `remove_automation_point`,
+  `set_clip_note` — any future tool addressing an existing event by index must take it.
+- The guard compares in the clip's **own time base** (mirroring `Cursor.Operator.isEqual`,
+  which under TEMPO ignores millis entirely) with an epsilon wide enough to absorb JSON
+  double round-tripping, so echoing a cursor from a previous read can never false-miss.
+
+## Paged reads (composition surface)
+
+`get_clip_lane` is the template for any future tool whose collection can be unboundedly
+large (`list_parameters` on a big project is the known next candidate):
+
+- **Range + page args**: `from`/`to` are an *inclusive* cursor window (either side
+  omitted = unbounded); `offset` (default 0) indexes into the **matched** set, `limit`
+  caps the page — default 200, max 1000, shared constants
+  (`ClipEvents.DEFAULT_PAGE_LIMIT`/`MAX_PAGE_LIMIT`) so the schema and validation can't
+  drift.
+- **Envelope**: `eventCount` (collection total, unfiltered) / `total` (matched by the
+  window) / `offset` / `limit` (echoed) / `returned` / `truncated` (more matches exist
+  past this page — advance `offset`). Two distinct totals so an agent can always tell a
+  short page from a short lane.
+- Paged entries carry their **absolute** index in the underlying collection — the address
+  the mutations take — never a page-relative one.
+
 ## Image-bearing results (PR-8)
 
 - A tool that returns media uses `Result.okImage(payload, pngSupplier)` — the seam adds
@@ -212,6 +288,35 @@ Decided once (#108) so it isn't re-litigated per tool:
   already-started timeout, never blind-retry.
 - Every mutation's domain test is do → undo → assert restored (qa-strategy); the undo
   assertion doubles as proof the primitive used a real `LXCommand`.
+
+### Not-undoable disclosure
+
+- Some things LX ships **no command for** (transport launch/stop, the timeline `arm`
+  field, a lane's `uiVisible`, text-note events, MIDI device/surface flags). The tool
+  still ships, as a direct engine edit — but its description must say so, with the
+  literal sentence **"Not undoable with Cmd-Z."** as the closing disclosure (agents relay
+  it to users deciding whether an edit is safe to try). Silence means command-backed and
+  undoable; there is no mandatory positive-disclosure counterpart, though many
+  descriptions volunteer one ("Undoable in Chromatik with Cmd-Z", or noting undo quirks
+  like `add_locator`'s label surviving outside the undo stack).
+
+### Benign no-ops (`isIgnored` commands)
+
+- `LXCommandEngine.perform` never pushes a command that flags itself `isIgnored`, so
+  `Commands.perform`'s undo-stack detector would misread the benign no-op as a failed
+  command (`internal`). Where the no-op is the **common agent intent**, the primitive
+  detects it by state-read and returns success with an explicit marker instead of
+  erroring:
+  - `add_clip_lane` on an already-existing lane returns the existing lane with
+    `alreadyExisted: true` (state-read *before* performing; keeps "make sure a lane
+    exists" idempotent) — `ClipLanes.addParameterLane`/`addPatternLane`.
+  - `remove_clip_range` / `collapse_clip_range` on a range containing nothing to remove
+    succeed with `removedCount: 0` (event-count delta read back from the lane is both
+    the success detector and the returned count) — `ClipEvents.performRangeEdit`.
+- The line between benign and bogus: a no-op that any correct agent plan can hit
+  (lane already there, empty range) is a success; a request that is *wrong on its face*
+  (a reversed `from`/`to` range, which would silently match nothing) is a loud
+  `invalid_argument`, never a `removedCount: 0`.
 
 ## Threading
 
