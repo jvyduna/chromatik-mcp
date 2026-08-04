@@ -82,7 +82,7 @@ public final class LaunchClip implements LxTool {
     }
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("mode", mode);
-    payload.putAll(Clips.describe(clip));
+    payload.putAll(Payloads.clip(Clips.describe(clip)));
     return Result.ok(payload);
   }
 }

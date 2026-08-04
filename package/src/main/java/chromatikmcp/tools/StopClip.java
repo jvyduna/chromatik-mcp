@@ -45,6 +45,6 @@ public final class StopClip implements LxTool {
   public Result<Map<String, Object>> handle(LX lx, Map<String, Object> args) {
     LXClip clip = Clips.resolve(lx, Args.optionalString(args, "path"));
     Clips.stop(clip);
-    return Result.ok(Clips.describe(clip));
+    return Result.ok(Payloads.clip(Clips.describe(clip)));
   }
 }

@@ -34,16 +34,15 @@ class CompositionLocatorsTest extends CompositionTestSupport {
     composition.addLocator(composition.constructAbsoluteCursor(5_000));
     composition.addLocator(composition.constructAbsoluteCursor(2_000));
 
-    Map<String, Object> payload = Compositions.listLocators(lx);
-    assertEquals("/lx/timeline/composition", payload.get("path"));
-    assertEquals(2, payload.get("locatorCount"));
-    @SuppressWarnings("unchecked")
-    List<Map<String, Object>> locators = (List<Map<String, Object>>) payload.get("locators");
-    assertEquals(2_000.0, ((Map<?, ?>) locators.get(0).get("cursor")).get("millis"));
-    assertEquals(5_000.0, ((Map<?, ?>) locators.get(1).get("cursor")).get("millis"));
+    Compositions.LocatorList payload = Compositions.listLocators(lx);
+    assertEquals("/lx/timeline/composition", payload.path());
+    assertEquals(2, payload.locatorCount());
+    List<Compositions.LocatorSummary> locators = payload.locators();
+    assertEquals(2_000.0, locators.get(0).cursor().millis());
+    assertEquals(5_000.0, locators.get(1).cursor().millis());
     for (int i = 0; i < locators.size(); ++i) {
-      assertEquals(i + 1, locators.get(i).get("index"), "locator index is 1-based");
-      String path = (String) locators.get(i).get("path");
+      assertEquals(i + 1, locators.get(i).index(), "locator index is 1-based");
+      String path = locators.get(i).path();
       assertEquals("/lx/timeline/composition/locator/" + (i + 1), path);
       assertSame(composition.locators.get(i), Resolve.component(lx, path));
     }
@@ -61,9 +60,9 @@ class CompositionLocatorsTest extends CompositionTestSupport {
     // 2 — the summary must report list position (2nd, 1-indexed) and a path that
     // resolves, not the stale locator/3.
     composition.removeLocator(composition.locators.get(1));
-    Map<String, Object> summary = Compositions.locatorSummary(composition, last);
-    assertEquals(2, summary.get("index"));
-    assertSame(last, Resolve.component(lx, (String) summary.get("path")));
+    Compositions.LocatorSummary summary = Compositions.locatorSummary(composition, last);
+    assertEquals(2, summary.index());
+    assertSame(last, Resolve.component(lx, summary.path()));
   }
 
   @Test
@@ -103,7 +102,7 @@ class CompositionLocatorsTest extends CompositionTestSupport {
         lx, composition.constructAbsoluteCursor(2_000), "Intro");
     assertEquals(2, composition.locators.size());
     // Sorted ahead of the pre-existing 5s locator; 1-indexed summary echoes that.
-    assertEquals(1, Compositions.locatorSummary(composition, added).get("index"));
+    assertEquals(1, Compositions.locatorSummary(composition, added).index());
     assertEquals("Intro", added.getLabel());
     assertCursorEqual(composition, composition.constructAbsoluteCursor(2_000),
         added.position.cursor);
@@ -143,12 +142,12 @@ class CompositionLocatorsTest extends CompositionTestSupport {
     Compositions.moveLocator(lx, a, composition.constructAbsoluteCursor(8_000));
     assertCursorEqual(composition, composition.constructAbsoluteCursor(8_000),
         a.position.cursor);
-    assertEquals(2, Compositions.locatorSummary(composition, a).get("index"),
+    assertEquals(2, Compositions.locatorSummary(composition, a).index(),
         "move re-sorts: A passed B");
 
     lx.command.undo();
     assertCursorEqual(composition, before, a.position.cursor);
-    assertEquals(1, Compositions.locatorSummary(composition, a).get("index"));
+    assertEquals(1, Compositions.locatorSummary(composition, a).index());
   }
 
   @Test
@@ -199,11 +198,10 @@ class CompositionLocatorsTest extends CompositionTestSupport {
     LX lx = newHeadlessLx();
     LXComposition composition = composition(lx);
     Locator locator = composition.addLocator(composition.constructTempoCursor(8, 0));
-    Map<String, Object> summary = Compositions.locatorSummary(composition, locator);
-    Map<?, ?> cursor = (Map<?, ?>) summary.get("cursor");
-    assertEquals(8, cursor.get("beatCount"));
-    assertEquals(0.0, cursor.get("beatBasis"));
-    assertNotNull(cursor.get("millis"));
-    assertNotNull(cursor.get("formatted"));
+    Compositions.LocatorSummary summary = Compositions.locatorSummary(composition, locator);
+    Cursors.CursorInfo cursor = summary.cursor();
+    assertEquals(8, cursor.beatCount());
+    assertEquals(0.0, cursor.beatBasis());
+    assertNotNull(cursor.formatted());
   }
 }

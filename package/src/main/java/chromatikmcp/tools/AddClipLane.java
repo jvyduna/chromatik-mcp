@@ -93,7 +93,7 @@ public final class AddClipLane implements LxTool {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("clipPath", Resolve.canonicalPath(clip));
     payload.put("alreadyExisted", added.alreadyExisted());
-    payload.put("lane", Payloads.laneSummary(added.lane()));
+    payload.put("lane", Payloads.laneSummary(ClipLanes.summary(added.lane())));
     payload.put("laneCount", clip.lanes.size());
     return Result.ok(payload);
   }

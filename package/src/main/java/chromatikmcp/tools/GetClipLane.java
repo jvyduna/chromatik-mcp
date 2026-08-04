@@ -9,6 +9,7 @@ import heronarts.lx.clip.Cursor;
 import heronarts.lx.clip.LXClipLane;
 
 import chromatikmcp.domain.ClipEvents;
+import chromatikmcp.domain.ClipLanes;
 import chromatikmcp.domain.Cursors;
 import chromatikmcp.domain.Resolve;
 
@@ -77,11 +78,11 @@ public final class GetClipLane implements LxTool {
     int limit = Args.optionalInt(args, "limit", ClipEvents.DEFAULT_PAGE_LIMIT);
 
     Map<String, Object> payload = new LinkedHashMap<>();
-    payload.putAll(Payloads.laneSummary(lane));
+    payload.putAll(Payloads.laneSummary(ClipLanes.summary(lane)));
     payload.put("clipPath", Resolve.canonicalPath(lane.clip));
     payload.put("timeBase", lane.clip.getTimeBase().name());
     // The page's eventCount matches the summary's by construction; putAll keeps them one.
-    payload.putAll(ClipEvents.page(lane, from, to, offset, limit));
+    payload.putAll(Payloads.eventPage(ClipEvents.page(lane, from, to, offset, limit)));
     return Result.ok(payload);
   }
 }

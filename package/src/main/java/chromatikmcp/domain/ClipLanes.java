@@ -1,9 +1,7 @@
 package chromatikmcp.domain;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 import heronarts.lx.LX;
 import heronarts.lx.clip.AudioClipLane;
@@ -75,45 +73,59 @@ public final class ClipLanes {
   /**
    * The per-lane summary shared by list_clip_lanes and get_composition (and reused as the
    * base of every lane-mutation echo): path, 0-based index, type, label, eventCount,
-   * uiVisible, removable, plus the lane's target where it has one (parameterPath /
-   * busPath / channelPath).
+   * uiVisible, removable, plus the lane's target where it has one.
+   *
+   * <p>The three target fields are mutually exclusive and null on a lane that has none —
+   * or whose target isn't path-registered. {@code Payloads.laneSummary} omits a null key
+   * rather than emitting a literal JSON null (see {@code Payloads.putIfPresent}).
    */
-  public static Map<String, Object> summary(LXClipLane<?> lane) {
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("path", lanePath(lane));
-    map.put("index", lane.getIndex());
-    map.put("type", type(lane));
-    map.put("label", lane.getLabel());
-    map.put("eventCount", lane.events.size());
-    map.put("uiVisible", lane.uiVisible.isOn());
-    map.put("removable", isRemovable(lane));
+  public record LaneSummary(
+      String path,
+      int index,
+      String type,
+      String label,
+      int eventCount,
+      boolean uiVisible,
+      boolean removable,
+      String parameterPath,
+      String busPath,
+      String channelPath) {}
+
+  /** Snapshots one lane; {@code Payloads.laneSummary} owns its MCP field names. */
+  public static LaneSummary summary(LXClipLane<?> lane) {
+    String parameterPath = null;
+    String busPath = null;
+    String channelPath = null;
     switch (lane) {
-      case ParameterClipLane l -> putIfPresent(map, "parameterPath",
-          Resolve.canonicalPathOrNull(l.parameter));
-      case BusClipLane l -> putIfPresent(map, "busPath", Resolve.canonicalPathOrNull(l.bus));
+      case ParameterClipLane l -> parameterPath = Resolve.canonicalPathOrNull(l.parameter);
+      case BusClipLane l -> busPath = Resolve.canonicalPathOrNull(l.bus);
       // Both channel fields are nullable upstream (master-bus MIDI lane, rack pattern lane).
-      case MidiNoteClipLane l -> putIfPresent(map, "channelPath",
-          (l.channel != null) ? Resolve.canonicalPathOrNull(l.channel) : null);
-      case PatternClipLane l -> putIfPresent(map, "channelPath",
-          (l.channel != null) ? Resolve.canonicalPathOrNull(l.channel) : null);
+      case MidiNoteClipLane l -> channelPath =
+          (l.channel != null) ? Resolve.canonicalPathOrNull(l.channel) : null;
+      case PatternClipLane l -> channelPath =
+          (l.channel != null) ? Resolve.canonicalPathOrNull(l.channel) : null;
       default -> { }
     }
-    return map;
+    return new LaneSummary(
+        lanePath(lane),
+        lane.getIndex(),
+        type(lane),
+        lane.getLabel(),
+        lane.events.size(),
+        lane.uiVisible.isOn(),
+        isRemovable(lane),
+        parameterPath,
+        busPath,
+        channelPath);
   }
 
   /** Lane summaries for every lane on the clip, in engine order. */
-  public static List<Map<String, Object>> list(LXClip clip) {
-    List<Map<String, Object>> lanes = new ArrayList<>();
+  public static List<LaneSummary> list(LXClip clip) {
+    List<LaneSummary> lanes = new ArrayList<>();
     for (LXClipLane<?> lane : clip.lanes) {
       lanes.add(summary(lane));
     }
     return lanes;
-  }
-
-  private static void putIfPresent(Map<String, Object> map, String key, Object value) {
-    if (value != null) {
-      map.put(key, value);
-    }
   }
 
   // ============================================================

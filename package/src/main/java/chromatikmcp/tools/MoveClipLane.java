@@ -62,7 +62,7 @@ public final class MoveClipLane implements LxTool {
     payload.put("requestedIndex", index);
     payload.put("fromIndex", fromIndex);
     payload.put("moved", lane.getIndex() != fromIndex);
-    payload.put("lane", Payloads.laneSummary(lane));
+    payload.put("lane", Payloads.laneSummary(ClipLanes.summary(lane)));
     payload.put("laneCount", lane.clip.lanes.size());
     return Result.ok(payload);
   }

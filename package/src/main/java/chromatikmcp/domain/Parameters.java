@@ -469,7 +469,7 @@ public final class Parameters {
       // A Cursor.Parameter never updates its own double value — set() writes only the
       // subparameters — so the generic branch would confidently report every clip and
       // composition length/marker as 0.0. Emit the real cursor object instead.
-      value = Cursors.toMap(cursorParameter.clip, cursorParameter.cursor);
+      value = Cursors.describe(cursorParameter.clip, cursorParameter.cursor).toMap();
       formatted = Cursors.format(cursorParameter.clip, cursorParameter.cursor);
     } else if (parameter instanceof DiscreteParameter d) {
       // getValuei()/getOption()/getFormatter().format(getValue()) already read through live

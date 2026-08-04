@@ -63,7 +63,7 @@ public final class RemoveClipLane implements LxTool {
     payload.put("clipPath", Resolve.canonicalPath(clip));
     payload.put("removed", removed);
     payload.put("laneCount", clip.lanes.size());
-    payload.put("lanes", Payloads.laneSummaries(clip));
+    payload.put("lanes", Payloads.laneSummaries(ClipLanes.list(clip)));
     return Result.ok(payload);
   }
 }

@@ -3,7 +3,6 @@ package chromatikmcp.domain;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.UnsupportedAudioFileException;
@@ -17,6 +16,11 @@ import heronarts.lx.clip.LXComposition;
 import heronarts.lx.clip.TextNoteClipEvent;
 import heronarts.lx.clip.TextNoteClipLane;
 import heronarts.lx.command.LXCommand;
+
+import chromatikmcp.domain.ClipEvents.EventDetail;
+import chromatikmcp.domain.ClipLanes.LaneSummary;
+import chromatikmcp.domain.Clips.ClipEnvelope;
+import chromatikmcp.domain.Cursors.CursorInfo;
 
 /**
  * Composition-only primitives: things that exist on the arrange timeline's
@@ -47,14 +51,22 @@ public final class Compositions {
    * {@code addParameter}, unreachable via set_parameter by design), sync, locator count,
    * and per-lane summaries.
    */
-  public static Map<String, Object> describe(LX lx) {
+  public record CompositionDetail(
+      ClipEnvelope envelope,
+      boolean armed,
+      boolean sync,
+      int locatorCount,
+      List<LaneSummary> lanes) {}
+
+  /** Snapshots {@link CompositionDetail}; {@code Payloads.composition} flattens it. */
+  public static CompositionDetail describe(LX lx) {
     LXComposition composition = get(lx);
-    Map<String, Object> map = Clips.envelope(composition);
-    map.put("armed", lx.engine.timeline.arm.isOn());
-    map.put("sync", lx.engine.timeline.sync.isOn());
-    map.put("locatorCount", composition.locators.size());
-    map.put("lanes", ClipLanes.list(composition));
-    return map;
+    return new CompositionDetail(
+        Clips.envelope(composition),
+        lx.engine.timeline.arm.isOn(),
+        lx.engine.timeline.sync.isOn(),
+        composition.locators.size(),
+        ClipLanes.list(composition));
   }
 
   // ============================================================
@@ -75,33 +87,38 @@ public final class Compositions {
    * payload {@code index} is 0-based; one locator vocabulary beats two off-by-one ones.
    * The list re-sorts by cursor on every add/move, so indices are positional.
    */
-  public static Map<String, Object> locatorSummary(
+  public record LocatorSummary(String path, int index, String label, CursorInfo cursor) {}
+
+  /** Snapshots one locator; {@code Payloads.locator} owns its MCP field names. */
+  public static LocatorSummary locatorSummary(
       LXComposition composition, heronarts.lx.clip.Locator locator) {
     // Position in the live list, NOT locator.getIndex(): upstream removeLocator skips the
     // re-index pass that add/move run, so getIndex() (and thus getCanonicalPath()) can be
     // stale until the next sort.
     int index = composition.locators.indexOf(locator) + 1;
-    Map<String, Object> map = new java.util.LinkedHashMap<>();
-    map.put("path", Resolve.canonicalPath(composition) + "/locator/" + index);
-    map.put("index", index);
-    map.put("label", locator.getLabel());
-    map.put("cursor", Cursors.toMap(composition, locator.position.cursor));
-    return map;
+    return new LocatorSummary(
+        Resolve.canonicalPath(composition) + "/locator/" + index,
+        index,
+        locator.getLabel(),
+        Cursors.describe(composition, locator.position.cursor));
   }
 
-  /** The list_locators payload: composition identity plus every locator in cursor order. */
-  public static Map<String, Object> listLocators(LX lx) {
+  /** The list_locators state: composition identity plus every locator in cursor order. */
+  public record LocatorList(
+      String path, String timeBase, int locatorCount, List<LocatorSummary> locators) {}
+
+  /** Snapshots every locator; {@code Payloads.locatorList} owns its MCP field names. */
+  public static LocatorList listLocators(LX lx) {
     LXComposition composition = get(lx);
-    Map<String, Object> map = new java.util.LinkedHashMap<>();
-    map.put("path", Resolve.canonicalPath(composition));
-    map.put("timeBase", composition.getTimeBase().name());
-    map.put("locatorCount", composition.locators.size());
-    java.util.List<Map<String, Object>> locators = new java.util.ArrayList<>();
+    List<LocatorSummary> locators = new java.util.ArrayList<>();
     for (heronarts.lx.clip.Locator locator : composition.locators) {
       locators.add(locatorSummary(composition, locator));
     }
-    map.put("locators", locators);
-    return map;
+    return new LocatorList(
+        Resolve.canonicalPath(composition),
+        composition.getTimeBase().name(),
+        composition.locators.size(),
+        locators);
   }
 
   /**
@@ -246,6 +263,14 @@ public final class Compositions {
     Commands.perform(lx, new LXCommand.Composition.AddAudioLane(composition, file));
     for (LXClipLane<?> lane : composition.lanes) {
       if (lane instanceof AudioClipLane audioLane && !before.contains(lane)) {
+        if (audioLane.events.isEmpty()) {
+          // Upstream builds the lane and its single file-backed event together, so callers
+          // read events.get(0) unguarded. Assert it here rather than let a future upstream
+          // split surface as an IndexOutOfBoundsException from the tool layer.
+          throw new IllegalStateException(
+              "AddAudioLane committed but the lane carries no audio event: "
+                  + file.getAbsolutePath());
+        }
         return audioLane;
       }
     }
@@ -317,19 +342,22 @@ public final class Compositions {
    * ({@code {index, cursor, note, length, end}}), so add/set_clip_note and get_clip_lane
    * can never drift on field names.
    */
-  public static Map<String, Object> describeNote(TextNoteClipLane lane, TextNoteClipEvent event) {
+  public static EventDetail describeNote(TextNoteClipLane lane, TextNoteClipEvent event) {
     return ClipEvents.detail(lane, event, lane.events.indexOf(event));
   }
 
   /**
-   * Audio event payload: the shared {@link ClipEvents#detail} shape plus {@code filePath}
-   * — an additive extension (tool-conventions "Drill-down" pattern), never a parallel
+   * Audio event state: the shared {@link ClipEvents#detail} shape plus {@code filePath} —
+   * an additive extension (tool-conventions "Drill-down" pattern), never a parallel
    * serializer, so add_audio_lane and get_clip_lane share every common field.
    */
-  public static Map<String, Object> describeAudioEvent(AudioClipLane lane, AudioClipEvent event) {
-    Map<String, Object> map = ClipEvents.detail(lane, event, lane.events.indexOf(event));
-    map.put("filePath", event.filePath.getString());
-    return map;
+  public record AudioEventDetail(EventDetail event, String filePath) {}
+
+  /** Snapshots one audio event; {@code Payloads.audioEvent} flattens it. */
+  public static AudioEventDetail describeAudioEvent(AudioClipLane lane, AudioClipEvent event) {
+    return new AudioEventDetail(
+        ClipEvents.detail(lane, event, lane.events.indexOf(event)),
+        event.filePath.getString());
   }
 
   /**

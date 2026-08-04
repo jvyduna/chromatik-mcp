@@ -88,8 +88,8 @@ public final class SetAutomationPoint implements LxTool {
     ParameterClipEvent.Curve curve = curveArg(args);
     Double shape = Args.optionalBoundedNumber(args, "shape", -1, 1);
     boolean resetShape = Args.optionalBoolean(args, "resetShape", false);
-    return Result.ok(ClipEvents.editParameterEvent(
-        lx, lane, index, atCursor, toCursor, normalized, curve, shape, resetShape));
+    return Result.ok(Payloads.parameterEvent(ClipEvents.editParameterEvent(
+        lx, lane, index, atCursor, toCursor, normalized, curve, shape, resetShape)));
   }
 
   private static Cursor cursorArg(ParameterClipLane lane, Map<String, Object> args, String name) {

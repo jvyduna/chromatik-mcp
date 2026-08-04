@@ -67,6 +67,7 @@ public final class AddAutomationPoint implements LxTool {
     double normalized = Args.requireDouble(args, "normalized");
     // The shared envelope (lanePath/parameterPath/timeBase + detail + eventCount) is
     // built inside the primitive so this echo cannot drift from set_automation_point's.
-    return Result.ok(ClipEvents.insertParameterEvent(lx, lane, cursor, normalized));
+    return Result.ok(Payloads.parameterEvent(
+        ClipEvents.insertParameterEvent(lx, lane, cursor, normalized)));
   }
 }

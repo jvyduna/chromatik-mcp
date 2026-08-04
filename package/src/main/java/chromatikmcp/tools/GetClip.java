@@ -49,6 +49,6 @@ public final class GetClip implements LxTool {
   @Override
   public Result<Map<String, Object>> handle(LX lx, Map<String, Object> args) {
     LXClip clip = Clips.resolve(lx, Args.optionalString(args, "path"));
-    return Result.ok(Clips.describe(clip));
+    return Result.ok(Payloads.clip(Clips.describe(clip)));
   }
 }

@@ -1,7 +1,6 @@
 package chromatikmcp.domain;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,6 +17,8 @@ import heronarts.lx.clip.ParameterClipLane;
 import heronarts.lx.clip.PatternClipEvent;
 import heronarts.lx.clip.TextNoteClipEvent;
 import heronarts.lx.command.LXCommand;
+
+import chromatikmcp.domain.Cursors.CursorInfo;
 
 /**
  * Clip-lane event primitives. Events are NOT {@code LXComponent}s and have no canonical
@@ -62,14 +63,43 @@ public final class ClipEvents {
   }
 
   /**
-   * The base event payload every event-shaped map starts from: {@code {index, cursor}}.
-   * Family serializers extend this with type-specific value fields.
+   * One event: its positional address ({@code index}), its position ({@code cursor}), and
+   * the type-appropriate value carried by its lane kind — null on a bare address echo (see
+   * {@link #describe}) or a lane type with no value fields. {@code Payloads.event} flattens
+   * the value onto the same map level, so one wire shape covers every lane type.
    */
-  public static Map<String, Object> describe(LXClipLane<?> lane, LXClipEvent<?> event, int index) {
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("index", index);
-    map.put("cursor", Cursors.toMap(lane.clip, event.getCursor()));
-    return map;
+  public record EventDetail(int index, CursorInfo cursor, EventValue value) {}
+
+  /** The per-lane-kind value half of {@link EventDetail}. */
+  public sealed interface EventValue {}
+
+  /** Automation point: normalized value plus its interpolation curve/shape. */
+  public record ParameterValue(double normalized, String curve, double shape)
+      implements EventValue {}
+
+  /** Pattern change; {@code patternPath} is null when the pattern isn't path-registered. */
+  public record PatternValue(String patternLabel, String patternPath) implements EventValue {}
+
+  /** One MIDI note-on or note-off. */
+  public record MidiNoteValue(boolean noteOn, int pitch, int velocity, int midiChannel)
+      implements EventValue {}
+
+  /** Composition-span events (audio, text) occupy a window, not a point. */
+  public record Span(CursorInfo length, CursorInfo end) {}
+
+  /** Imported audio, with the window it occupies on the timeline. */
+  public record AudioValue(String fileName, double sourceLengthMs, Span span)
+      implements EventValue {}
+
+  /** A timeline text note, with the window it occupies. */
+  public record TextNoteValue(String note, Span span) implements EventValue {}
+
+  /**
+   * The bare event address {@code {index, cursor}}, with no value half — what a removal
+   * echoes, since a removed event has no value worth reading back.
+   */
+  public static EventDetail describe(LXClipLane<?> lane, LXClipEvent<?> event, int index) {
+    return new EventDetail(index, Cursors.describe(lane.clip, event.getCursor()), null);
   }
 
   private static boolean cursorMatches(LXClipLane<?> lane, Cursor actual, Cursor expected) {
@@ -102,7 +132,16 @@ public final class ClipEvents {
    * reports {@code eventCount} (lane total) / {@code total} (matched) / {@code returned} /
    * {@code truncated} so an agent can always tell a short page from a short lane.
    */
-  public static Map<String, Object> page(
+  public record EventPage(
+      int eventCount,
+      int total,
+      int offset,
+      int limit,
+      int returned,
+      boolean truncated,
+      List<EventDetail> events) {}
+
+  public static EventPage page(
       LXClipLane<?> lane, Cursor from, Cursor to, int offset, int limit) {
     if (offset < 0) {
       throw Resolve.invalidArgument("offset must be >= 0: " + offset);
@@ -111,7 +150,7 @@ public final class ClipEvents {
       throw Resolve.invalidArgument("limit must be 1-" + MAX_PAGE_LIMIT + ": " + limit);
     }
     final Cursor.Operator op = lane.clip.CursorOp();
-    final List<Map<String, Object>> events = new ArrayList<>();
+    final List<EventDetail> events = new ArrayList<>();
     int total = 0;
     // Linear scan rather than the lane's binary-search iterators: the payload needs
     // absolute indices anyway (which the scan yields for free), and range comparison in
@@ -128,15 +167,8 @@ public final class ClipEvents {
       }
       ++total;
     }
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("eventCount", lane.events.size());
-    map.put("total", total);
-    map.put("offset", offset);
-    map.put("limit", limit);
-    map.put("returned", events.size());
-    map.put("truncated", offset + events.size() < total);
-    map.put("events", events);
-    return map;
+    return new EventPage(lane.events.size(), total, offset, limit, events.size(),
+        offset + events.size() < total, events);
   }
 
   /**
@@ -145,39 +177,20 @@ public final class ClipEvents {
    * normalized/curve/shape, pattern changes their pattern, MIDI notes their note bytes,
    * and composition-span events (audio, text) their length/end window.
    */
-  public static Map<String, Object> detail(LXClipLane<?> lane, LXClipEvent<?> event, int index) {
-    Map<String, Object> map = describe(lane, event, index);
-    switch (event) {
-      case ParameterClipEvent e -> {
-        map.put("normalized", e.getNormalized());
-        map.put("curve", e.getCurve().name());
-        map.put("shape", e.getShape());
-      }
-      case PatternClipEvent e -> {
-        map.put("patternLabel", e.getPattern().getLabel());
-        String patternPath = Resolve.canonicalPathOrNull(e.getPattern());
-        if (patternPath != null) {
-          map.put("patternPath", patternPath);
-        }
-      }
-      case MidiNoteClipEvent e -> {
-        map.put("noteOn", e.isNoteOn());
-        map.put("pitch", e.midiNote.getPitch());
-        map.put("velocity", e.midiNote.getVelocity());
-        map.put("midiChannel", e.midiNote.getChannel());
-      }
-      case AudioClipEvent e -> {
-        map.put("fileName", e.fileName.getString());
-        map.put("sourceLengthMs", e.getSourceLengthMs());
-        putSpan(map, lane, e);
-      }
-      case TextNoteClipEvent e -> {
-        map.put("note", e.note.getString());
-        putSpan(map, lane, e);
-      }
-      default -> { }
-    }
-    return map;
+  public static EventDetail detail(LXClipLane<?> lane, LXClipEvent<?> event, int index) {
+    EventValue value = switch (event) {
+      case ParameterClipEvent e ->
+          new ParameterValue(e.getNormalized(), e.getCurve().name(), e.getShape());
+      case PatternClipEvent e ->
+          new PatternValue(e.getPattern().getLabel(), Resolve.canonicalPathOrNull(e.getPattern()));
+      case MidiNoteClipEvent e -> new MidiNoteValue(
+          e.isNoteOn(), e.midiNote.getPitch(), e.midiNote.getVelocity(), e.midiNote.getChannel());
+      case AudioClipEvent e ->
+          new AudioValue(e.fileName.getString(), e.getSourceLengthMs(), span(lane, e));
+      case TextNoteClipEvent e -> new TextNoteValue(e.note.getString(), span(lane, e));
+      default -> null;
+    };
+    return new EventDetail(index, Cursors.describe(lane.clip, event.getCursor()), value);
   }
 
   /**
@@ -187,7 +200,7 @@ public final class ClipEvents {
    * {@link #parameterEventEnvelope} of the event read back from the lane — value, cursor,
    * and resulting absolute index — never the request.
    */
-  public static Map<String, Object> insertParameterEvent(
+  public static ParameterEventEnvelope insertParameterEvent(
       LX lx, ParameterClipLane lane, Cursor cursor, double normalized) {
     LXCommand.Clip.Event.Parameter.InsertEvent command =
         new LXCommand.Clip.Event.Parameter.InsertEvent(lane, cursor, normalized);
@@ -201,25 +214,27 @@ public final class ClipEvents {
    * get_clip_lane emits, so the read tool and the two sibling mutations can never drift
    * on field names ({@code normalized}, never a divergent {@code value} key).
    */
-  public static Map<String, Object> parameterEventEnvelope(
+  public record ParameterEventEnvelope(
+      String lanePath,
+      String parameterPath,
+      String timeBase,
+      EventDetail event,
+      int eventCount) {}
+
+  /** Snapshots that envelope; {@code Payloads.parameterEvent} owns its MCP field names. */
+  public static ParameterEventEnvelope parameterEventEnvelope(
       ParameterClipLane lane, ParameterClipEvent event) {
-    Map<String, Object> payload = new LinkedHashMap<>();
-    payload.put("lanePath", ClipLanes.lanePath(lane));
-    String parameterPath = Resolve.canonicalPathOrNull(lane.parameter);
-    if (parameterPath != null) {
-      payload.put("parameterPath", parameterPath);
-    }
-    payload.put("timeBase", lane.clip.getTimeBase().name());
-    payload.putAll(detail(lane, event, lane.events.indexOf(event)));
-    payload.put("eventCount", lane.events.size());
-    return payload;
+    return new ParameterEventEnvelope(
+        ClipLanes.lanePath(lane),
+        Resolve.canonicalPathOrNull(lane.parameter),
+        lane.clip.getTimeBase().name(),
+        detail(lane, event, lane.events.indexOf(event)),
+        lane.events.size());
   }
 
-  /** Composition-span events (audio, text) occupy a window, not a point. */
-  private static void putSpan(
-      Map<String, Object> map, LXClipLane<?> lane, LXCompositionEvent<?> event) {
-    map.put("length", Cursors.toMap(lane.clip, event.length));
-    map.put("end", Cursors.toMap(lane.clip, event.end));
+  private static Span span(LXClipLane<?> lane, LXCompositionEvent<?> event) {
+    return new Span(
+        Cursors.describe(lane.clip, event.length), Cursors.describe(lane.clip, event.end));
   }
 
   // ============================================================
@@ -246,7 +261,7 @@ public final class ClipEvents {
    * event read back from the engine ({@code index, cursor, normalized, curve, shape}),
    * never the request.
    */
-  public static Map<String, Object> editParameterEvent(
+  public static ParameterEventEnvelope editParameterEvent(
       heronarts.lx.LX lx,
       heronarts.lx.clip.ParameterClipLane lane,
       int index,
@@ -309,7 +324,7 @@ public final class ClipEvents {
    * event that is no longer in the lane has no index to read back, so the pre-removal
    * address is the only honest echo.
    */
-  public static Map<String, Object> remove(LX lx, LXClipLane<?> lane, int index, Cursor atCursor) {
+  public static EventDetail remove(LX lx, LXClipLane<?> lane, int index, Cursor atCursor) {
     if (lane instanceof MidiNoteClipLane) {
       throw Resolve.invalidArgument(
           "Lane " + ClipLanes.lanePath(lane) + " is a MIDI note lane; its events pair "
@@ -317,7 +332,7 @@ public final class ClipEvents {
               + "is not exposed yet.");
     }
     LXClipEvent<?> event = eventAt(lane, index, atCursor);
-    Map<String, Object> removed = describe(lane, event, index);
+    EventDetail removed = describe(lane, event, index);
     int countBefore = lane.events.size();
     Commands.perform(lx, removeCommand(lane, event));
     if (lane.events.size() != countBefore - 1) {

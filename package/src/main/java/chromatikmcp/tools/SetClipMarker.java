@@ -116,7 +116,7 @@ public final class SetClipMarker implements LxTool {
     if (requested != null) {
       payload.put("clamped", !clip.CursorOp().isEqual(requested, echoed));
     }
-    payload.put("clip", Payloads.clipEnvelope(clip));
+    payload.put("clip", Payloads.clipEnvelope(Clips.envelope(clip)));
     return Result.ok(payload);
   }
 

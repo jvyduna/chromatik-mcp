@@ -55,6 +55,6 @@ public final class MoveLocator implements LxTool {
         composition, index, Args.optionalString(args, "label"));
     var cursor = Cursors.parse(composition, Args.requireMap(args, "cursor"));
     Compositions.moveLocator(lx, locator, cursor);
-    return Result.ok(Compositions.locatorSummary(composition, locator));
+    return Result.ok(Payloads.locator(Compositions.locatorSummary(composition, locator)));
   }
 }

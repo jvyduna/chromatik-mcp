@@ -17,7 +17,7 @@ import heronarts.lx.clip.Locator;
  * triple from the clip's {@code referenceBpm}. A Cursor can be read as a full triple but
  * never written as one, so the wire format is asymmetric by necessity:
  *
- * <p><b>Read</b> ({@link #toMap}): always the full object
+ * <p><b>Read</b> ({@link #describe}): always the full object
  * {@code {millis, beatCount, beatBasis, formatted}}. {@code formatted} is informational
  * only, never parsed back. Which fields are authoritative depends on the clip's
  * {@code timeBase}, which lives once on the clip/lane envelope, never per-cursor.
@@ -41,14 +41,35 @@ public final class Cursors {
       "millis", "beatCount", "beatBasis", "bars", "beats", "sixteenths",
       "at", "offsetBeats", "offsetMillis");
 
-  /** The read-side wire object: {@code {millis, beatCount, beatBasis, formatted}}. */
-  public static Map<String, Object> toMap(LXClip clip, Cursor cursor) {
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("millis", cursor.getMillis());
-    map.put("beatCount", cursor.getBeatCount());
-    map.put("beatBasis", cursor.getBeatBasis());
-    map.put("formatted", format(clip, cursor));
-    return map;
+  /**
+   * The read-side cursor triple plus its display label. A {@link Cursor} is a live engine
+   * field that LX rewrites in place, so this is the snapshot form every payload carries.
+   *
+   * <p>The serializer lives on the record rather than under {@code tools/} — the
+   * record-attached case the conventions carve out for a nested, broadly reused shape (the
+   * {@code Parameters.ParameterInfo.toMap()} precedent). A cursor is nested inside every
+   * clip, lane, event, and locator payload AND inside {@code ParameterInfo.value} for a
+   * {@code Cursor.Parameter}, whose serializer is itself record-attached; one definition
+   * here is what keeps those two families from drifting. {@code Payloads.cursor} is the
+   * tools-side entry point and delegates here.
+   */
+  public record CursorInfo(double millis, int beatCount, double beatBasis, String formatted) {
+
+    /** The wire object: {@code {millis, beatCount, beatBasis, formatted}}. */
+    public Map<String, Object> toMap() {
+      Map<String, Object> map = new LinkedHashMap<>();
+      map.put("millis", this.millis);
+      map.put("beatCount", this.beatCount);
+      map.put("beatBasis", this.beatBasis);
+      map.put("formatted", this.formatted);
+      return map;
+    }
+  }
+
+  /** Snapshots {@code cursor} in the clip's time base. */
+  public static CursorInfo describe(LXClip clip, Cursor cursor) {
+    return new CursorInfo(
+        cursor.getMillis(), cursor.getBeatCount(), cursor.getBeatBasis(), format(clip, cursor));
   }
 
   /**

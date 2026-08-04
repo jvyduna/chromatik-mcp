@@ -116,6 +116,41 @@ Decided once (#108) so it isn't re-litigated per tool:
   example: the domain walk returns typed entries, and the servlet serializes their flat
   HTTP JSON shape.
 
+### Composition surface layout
+
+The composition/clip surface is the largest worked example of the rule. Its typed results
+live beside the primitives that build them, and `tools/Payloads` owns every wire key:
+
+| Typed result | Serializer | Emitted by |
+| --- | --- | --- |
+| `Cursors.CursorInfo` | `CursorInfo.toMap()` (record-attached) | nested in every shape below |
+| `Clips.ClipEnvelope` / `ClipDetail` | `Payloads.clipEnvelope` / `clip` | `get_clip`, `launch_clip`, `stop_clip`, `set_clip_marker` |
+| `Compositions.CompositionDetail` | `Payloads.composition` | `get_composition` |
+| `ClipLanes.LaneSummary` | `Payloads.laneSummary` / `laneSummaries` | `list_clip_lanes`, `get_clip_lane`, `get_composition`, and all four lane mutations |
+| `ClipEvents.EventDetail` (+ its `EventValue` variants) | `Payloads.event` | `get_clip_lane`, note add/set, event removal |
+| `ClipEvents.EventPage` | `Payloads.eventPage` | `get_clip_lane` |
+| `ClipEvents.ParameterEventEnvelope` | `Payloads.parameterEvent` | `add_automation_point`, `set_automation_point` |
+| `Compositions.LocatorSummary` / `LocatorList` | `Payloads.locator` / `locatorList` | `list_locators` and all four locator mutations |
+| `Compositions.AudioEventDetail` | `Payloads.audioEvent` | `add_audio_lane` |
+
+- **`CursorInfo` is the one record-attached serializer here**, the carve-out for a nested,
+  broadly reused shape (the `ParameterInfo.toMap()` precedent). A cursor is nested inside
+  every payload in that table *and* inside `ParameterInfo.value` for a `Cursor.Parameter`,
+  whose own serializer is record-attached in `domain/` — one definition is what keeps the
+  two families from drifting. `Payloads.cursor` is the tools-side entry point and delegates.
+- **A polymorphic payload is a record plus a sealed value type**, not a map built by a
+  type switch: `EventDetail` carries the address (`index`, `cursor`) and an `EventValue`
+  that is one of `ParameterValue`/`PatternValue`/`MidiNoteValue`/`AudioValue`/
+  `TextNoteValue`, or null for a bare address echo. The serializer flattens the value onto
+  the same map level, so one wire shape still covers every lane type and the compiler —
+  not review — catches an unhandled kind.
+- **Additive extension stays additive**: a shape that is "the shared one plus a field"
+  (`add_audio_lane`'s `filePath`, `get_clip`'s `pending`) composes the shared serializer
+  and appends, never restates its keys.
+- `PayloadsTest` pins each shape's complete key list and asserts payload **identity**
+  between the sibling tools that emit the same named object — read vs. both mutations for
+  an event, the four lane emitters, the five locator emitters.
+
 ## Drill-down
 
 - Single-item detail on a collection is a sibling `get_*` tool (e.g. `get_fixture` next to
@@ -222,7 +257,7 @@ necessity**:
   use LX's 1-based array ordinal (`/lane/<n>`). Locators are **1-indexed everywhere** —
   argument, payload `index`, path ordinal, and the `{"at": "locator:<n>"}` cursor sugar —
   because one locator vocabulary beats two off-by-one ones (see
-  `Compositions.describeLocator`). Do not "unify" these: lane 0-basing matches the engine
+  `Compositions.locatorSummary`). Do not "unify" these: lane 0-basing matches the engine
   API surface that lane mutations echo, and locator 1-basing matches every place a locator
   is written. The rule of thumb for agents: **numbers in paths are always 1-based; a lane
   `index` field is 0-based; a locator `index` field is 1-based.**

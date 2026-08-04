@@ -63,7 +63,7 @@ public final class AddClipNote implements LxTool {
         lane, Args.requireString(args, "note"), cursor, length);
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("lanePath", ClipLanes.lanePath(lane));
-    payload.putAll(Compositions.describeNote(lane, event));
+    payload.putAll(Payloads.event(Compositions.describeNote(lane, event)));
     return Result.ok(payload);
   }
 }

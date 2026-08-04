@@ -52,7 +52,7 @@ public final class SetClipLaneVisible implements LxTool {
 
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("clipPath", Resolve.canonicalPath(lane.clip));
-    payload.put("lane", Payloads.laneSummary(lane));
+    payload.put("lane", Payloads.laneSummary(ClipLanes.summary(lane)));
     return Result.ok(payload);
   }
 }

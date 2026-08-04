@@ -39,6 +39,6 @@ public final class ListLocators implements LxTool {
 
   @Override
   public Result<Map<String, Object>> handle(LX lx, Map<String, Object> args) {
-    return Result.ok(Compositions.listLocators(lx));
+    return Result.ok(Payloads.locatorList(Compositions.listLocators(lx)));
   }
 }

@@ -1,12 +1,11 @@
 package chromatikmcp.domain;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 import heronarts.lx.LX;
 import heronarts.lx.clip.Cursor;
 import heronarts.lx.clip.LXClip;
 import heronarts.lx.command.LXCommand;
+
+import chromatikmcp.domain.Cursors.CursorInfo;
 
 /**
  * {@link LXClip}-scoped primitives — everything here works identically for the arrange
@@ -31,28 +30,45 @@ public final class Clips {
 
   /**
    * The shared clip envelope: identity, time base, and every marker as a full cursor
-   * object. {@code timeBase} lives here — once per clip, never per cursor — and decides
+   * snapshot. {@code timeBase} lives here — once per clip, never per cursor — and decides
    * which cursor fields are authoritative (TEMPO comparisons ignore millis entirely;
    * millis are derived from {@code referenceBpm}, not the live tempo).
    */
-  public static Map<String, Object> envelope(LXClip clip) {
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("path", Resolve.canonicalPath(clip));
-    map.put("label", clip.getLabel());
-    map.put("timeBase", clip.getTimeBase().name());
-    map.put("referenceBpm", clip.referenceBpm.getValue());
-    map.put("length", Cursors.toMap(clip, clip.length.cursor));
-    map.put("loop", clip.loop.isOn());
-    map.put("loopStart", Cursors.toMap(clip, clip.loopStart.cursor));
-    map.put("loopEnd", Cursors.toMap(clip, clip.loopEnd.cursor));
-    map.put("playStart", Cursors.toMap(clip, clip.playStart.cursor));
-    map.put("playEnd", Cursors.toMap(clip, clip.playEnd.cursor));
-    map.put("insertMarker", Cursors.toMap(clip, clip.insertMarker.cursor));
-    map.put("playhead", Cursors.toMap(clip, clip.getCursor()));
-    map.put("running", clip.isRunning());
-    map.put("hasContent", clip.hasContent());
-    map.put("laneCount", clip.lanes.size());
-    return map;
+  public record ClipEnvelope(
+      String path,
+      String label,
+      String timeBase,
+      double referenceBpm,
+      CursorInfo length,
+      boolean loop,
+      CursorInfo loopStart,
+      CursorInfo loopEnd,
+      CursorInfo playStart,
+      CursorInfo playEnd,
+      CursorInfo insertMarker,
+      CursorInfo playhead,
+      boolean running,
+      boolean hasContent,
+      int laneCount) {}
+
+  /** Snapshots the shared envelope; {@code Payloads.clipEnvelope} owns its MCP field names. */
+  public static ClipEnvelope envelope(LXClip clip) {
+    return new ClipEnvelope(
+        Resolve.canonicalPath(clip),
+        clip.getLabel(),
+        clip.getTimeBase().name(),
+        clip.referenceBpm.getValue(),
+        Cursors.describe(clip, clip.length.cursor),
+        clip.loop.isOn(),
+        Cursors.describe(clip, clip.loopStart.cursor),
+        Cursors.describe(clip, clip.loopEnd.cursor),
+        Cursors.describe(clip, clip.playStart.cursor),
+        Cursors.describe(clip, clip.playEnd.cursor),
+        Cursors.describe(clip, clip.insertMarker.cursor),
+        Cursors.describe(clip, clip.getCursor()),
+        clip.isRunning(),
+        clip.hasContent(),
+        clip.lanes.size());
   }
 
   // ============================================================
@@ -65,13 +81,14 @@ public final class Clips {
   // ============================================================
 
   /**
-   * The get_clip payload: the shared envelope plus transport state ({@code pending} —
+   * The get_clip state: the shared envelope plus transport state ({@code pending} —
    * whether a quantized launch is scheduled but hasn't fired yet).
    */
-  public static Map<String, Object> describe(LXClip clip) {
-    Map<String, Object> map = envelope(clip);
-    map.put("pending", clip.isPending());
-    return map;
+  public record ClipDetail(ClipEnvelope envelope, boolean pending) {}
+
+  /** Snapshots {@link ClipDetail}; {@code Payloads.clip} flattens it onto the wire. */
+  public static ClipDetail describe(LXClip clip) {
+    return new ClipDetail(envelope(clip), clip.isPending());
   }
 
   /**

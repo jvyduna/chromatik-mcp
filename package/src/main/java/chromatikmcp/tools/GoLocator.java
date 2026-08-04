@@ -55,7 +55,8 @@ public final class GoLocator implements LxTool {
         composition, index, Args.optionalString(args, "label"));
     boolean launched = Compositions.goLocator(lx, locator);
     Map<String, Object> payload = new LinkedHashMap<>();
-    payload.put("locator", Compositions.locatorSummary(composition, locator));
+    payload.put("locator",
+        Payloads.locator(Compositions.locatorSummary(composition, locator)));
     payload.put("launched", launched);
     payload.put("running", composition.isRunning());
     payload.put("insertMarker", Payloads.cursor(composition, composition.insertMarker.cursor));

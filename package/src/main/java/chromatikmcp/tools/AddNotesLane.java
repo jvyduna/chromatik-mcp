@@ -7,6 +7,7 @@ import java.util.Map;
 import heronarts.lx.LX;
 import heronarts.lx.clip.TextNoteClipLane;
 
+import chromatikmcp.domain.ClipLanes;
 import chromatikmcp.domain.Compositions;
 import chromatikmcp.domain.Resolve;
 
@@ -52,7 +53,7 @@ public final class AddNotesLane implements LxTool {
     // and add_audio_lane, so agents can read result.lane.path across the family.
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("clipPath", Resolve.canonicalPath(lane.clip));
-    payload.put("lane", Payloads.laneSummary(lane));
+    payload.put("lane", Payloads.laneSummary(ClipLanes.summary(lane)));
     payload.put("laneCount", lane.clip.lanes.size());
     return Result.ok(payload);
   }

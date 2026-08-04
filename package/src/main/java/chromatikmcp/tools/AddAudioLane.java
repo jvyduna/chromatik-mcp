@@ -8,6 +8,7 @@ import java.util.Map;
 import heronarts.lx.LX;
 import heronarts.lx.clip.AudioClipLane;
 
+import chromatikmcp.domain.ClipLanes;
 import chromatikmcp.domain.Compositions;
 import chromatikmcp.domain.Resolve;
 
@@ -57,10 +58,11 @@ public final class AddAudioLane implements LxTool {
     // with the imported event and the grown composition length.
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("clipPath", Resolve.canonicalPath(lane.clip));
-    payload.put("lane", Payloads.laneSummary(lane));
+    payload.put("lane", Payloads.laneSummary(ClipLanes.summary(lane)));
     payload.put("laneCount", lane.clip.lanes.size());
     // A freshly imported lane carries exactly the one event built from the file.
-    payload.put("event", Compositions.describeAudioEvent(lane, lane.events.get(0)));
+    payload.put("event",
+        Payloads.audioEvent(Compositions.describeAudioEvent(lane, lane.events.get(0))));
     payload.put("compositionLength", Payloads.cursor(lane.clip, lane.clip.length.cursor));
     return Result.ok(payload);
   }

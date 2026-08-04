@@ -57,7 +57,7 @@ public final class RemoveAutomationPoint implements LxTool {
     int index = Args.requireInt(args, "index");
     Map<String, Object> atCursorSpec = Args.optionalMap(args, "atCursor");
     Cursor atCursor = (atCursorSpec == null) ? null : Cursors.parse(lane.clip, atCursorSpec);
-    Map<String, Object> removed = ClipEvents.remove(lx, lane, index, atCursor);
+    Map<String, Object> removed = Payloads.event(ClipEvents.remove(lx, lane, index, atCursor));
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("lanePath", ClipLanes.lanePath(lane));
     payload.put("removed", removed);

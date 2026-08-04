@@ -51,7 +51,8 @@ public final class AddLocator implements LxTool {
     var composition = Compositions.get(lx);
     var cursor = Cursors.parse(composition, Args.requireMap(args, "cursor"));
     Locator locator = Compositions.addLocator(lx, cursor, Args.optionalString(args, "label"));
-    Map<String, Object> payload = Compositions.locatorSummary(composition, locator);
+    Map<String, Object> payload =
+        Payloads.locator(Compositions.locatorSummary(composition, locator));
     payload.put("locatorCount", composition.locators.size());
     return Result.ok(payload);
   }

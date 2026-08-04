@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -23,22 +24,38 @@ class CursorsTest extends CompositionTestSupport {
   }
 
   @Test
-  void toMapEmitsTheFullTriplePlusFormatted() {
+  void describeEmitsTheFullTriplePlusFormatted() {
     LX lx = newHeadlessLx();
     LXComposition clip = composition(lx);
     // New clips default to TEMPO timeBase (LXClipEngine.timeBaseDefault); formatted
     // follows the clip's own base — pin both renderings.
-    Map<String, Object> tempoMap = Cursors.toMap(clip, clip.constructTempoCursor(6, 0.25));
-    assertEquals(6, tempoMap.get("beatCount"));
-    assertEquals(0.25, tempoMap.get("beatBasis"));
-    assertTrue(tempoMap.containsKey("millis"));
-    assertEquals("2.3.2", tempoMap.get("formatted"));
+    Cursors.CursorInfo tempo = Cursors.describe(clip, clip.constructTempoCursor(6, 0.25));
+    assertEquals(6, tempo.beatCount());
+    assertEquals(0.25, tempo.beatBasis());
+    assertEquals("2.3.2", tempo.formatted());
 
     clip.timeBase.setValue(Cursor.TimeBase.ABSOLUTE);
-    Map<String, Object> map = Cursors.toMap(clip, clip.constructAbsoluteCursor(12500));
+    Cursors.CursorInfo absolute = Cursors.describe(clip, clip.constructAbsoluteCursor(12500));
+    assertEquals(12500.0, absolute.millis());
+    assertEquals("0:12:500", absolute.formatted());
+  }
+
+  /**
+   * The record-attached serializer is the single definition of the cursor wire object —
+   * every composition payload and {@code ParameterInfo}'s {@code Cursor.Parameter} value
+   * route through it, so its keys and their order are the contract.
+   */
+  @Test
+  void toMapPinsTheCursorWireShape() {
+    LX lx = newHeadlessLx();
+    LXComposition clip = composition(lx);
+    clip.timeBase.setValue(Cursor.TimeBase.ABSOLUTE);
+    Map<String, Object> map = Cursors.describe(clip, clip.constructAbsoluteCursor(12500)).toMap();
+    assertEquals(List.of("millis", "beatCount", "beatBasis", "formatted"),
+        List.copyOf(map.keySet()));
     assertEquals(12500.0, map.get("millis"));
-    assertTrue(map.containsKey("beatCount"));
-    assertTrue(map.containsKey("beatBasis"));
+    assertTrue(map.get("beatCount") instanceof Integer);
+    assertTrue(map.get("beatBasis") instanceof Double);
     assertEquals("0:12:500", map.get("formatted"));
   }
 

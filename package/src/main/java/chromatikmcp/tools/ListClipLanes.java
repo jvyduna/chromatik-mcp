@@ -7,6 +7,7 @@ import java.util.Map;
 import heronarts.lx.LX;
 import heronarts.lx.clip.LXClip;
 
+import chromatikmcp.domain.ClipLanes;
 import chromatikmcp.domain.Clips;
 import chromatikmcp.domain.Resolve;
 
@@ -55,7 +56,7 @@ public final class ListClipLanes implements LxTool {
     payload.put("clipPath", Resolve.canonicalPath(clip));
     payload.put("timeBase", clip.getTimeBase().name());
     payload.put("laneCount", clip.lanes.size());
-    payload.put("lanes", Payloads.laneSummaries(clip));
+    payload.put("lanes", Payloads.laneSummaries(ClipLanes.list(clip)));
     return Result.ok(payload);
   }
 }

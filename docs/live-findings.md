@@ -10,7 +10,7 @@ into slices when related items accumulate; lines deleted when their fix merges.
   `"index": 1`) as a possible off-by-one hazard at the `{"at": "locator:<n>"}` boundary.
   Owner confirmed the split is deliberate: lane `index` mirrors `lane.getIndex()` /
   `move_clip_lane`'s 0-based argument, locators are 1-indexed everywhere (argument, payload,
-  path, cursor sugar — `Compositions.describeLocator` documents the rationale). Recorded in
+  path, cursor sugar — `Compositions.locatorSummary` documents the rationale). Recorded in
   docs/tool-conventions.md "Positional addressing" with the agent rule of thumb: path
   ordinals 1-based, lane `index` 0-based, locator `index` 1-based. Remaining (small): the
   `at: locator:<n>` sugar's 1-based n is stated in Schemas' cursor description but could be

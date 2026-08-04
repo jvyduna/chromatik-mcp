@@ -43,6 +43,6 @@ public final class GetComposition implements LxTool {
 
   @Override
   public Result<Map<String, Object>> handle(LX lx, Map<String, Object> args) {
-    return Result.ok(Compositions.describe(lx));
+    return Result.ok(Payloads.composition(Compositions.describe(lx)));
   }
 }
