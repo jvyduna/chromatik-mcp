@@ -77,6 +77,41 @@ Decided once (#108) so it isn't re-litigated per tool:
   for a multi-operation call), not an oversight — the rest of the tool surface follows the
   rule above.
 
+## Domain results and serialization
+
+- Stable state crosses the domain/tool boundary as a typed record or domain object:
+  `LX objects -> typed domain result -> shared serializer -> Map<String, Object>`. Domain
+  code owns engine behavior and typed state; the shared serializer owns MCP field names
+  and final map construction.
+- Each new or changed stable wire shape has one serializer reused by every sibling read and
+  mutation tool that emits the same named object shape. Prefer a helper under `tools/` for
+  new top-level payloads. A serializer may instead live on its record when that record is
+  nested or broadly reused —
+  `Parameters.ParameterInfo.toMap()` is the existing example and prevents the field drift
+  previously seen between `get_parameter`, `list_parameters`, and `set_parameter`.
+- This is an incremental rule, not a demand that an unrelated PR migrate every untouched
+  inline formatter. The existing `remove_*` `{removed, kind}` family is known migration
+  inventory; a PR adding or changing that shape should centralize it, while unrelated work
+  need not absorb the whole family.
+- When payload identity across sibling tools is part of the contract, tests compare the
+  shared serializer output or the complete sibling payloads. Identity is contractual when
+  the tools are read/write views of the same named object or their documentation promises
+  the same shape. Generated tool-reference checks cover schemas and descriptions, not
+  response payload keys, so they do not detect this class of drift.
+- Raw `Map<String, Object>` remains correct for incoming MCP arguments, JSON Schema objects,
+  and final `structuredContent`. Simple handler arguments may continue to use `Args`; decode
+  a complex grammar reused by three or more tools into a typed value before calling the
+  domain layer, following `CLAUDE.md`'s extraction threshold.
+- Map-shaped domain results are limited to genuinely dynamic/open-ended structures.
+  Current justified cases are arbitrary fixture parameter name/value sets, catalog
+  frontmatter, and upstream `LXModel` metadata. Private maps used only while computing a
+  typed result are ordinary implementation details, not boundary exceptions. New
+  exceptions explain locally why a fixed record is unsuitable.
+- A fixed non-MCP JSON surface follows the same typed-result principle but places its
+  serializer at its own transport boundary. `OscParams`/`OscParamsServlet` is the existing
+  example: the domain walk returns typed entries, and the servlet serializes their flat
+  HTTP JSON shape.
+
 ## Drill-down
 
 - Single-item detail on a collection is a sibling `get_*` tool (e.g. `get_fixture` next to
