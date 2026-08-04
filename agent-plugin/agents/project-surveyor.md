@@ -1,7 +1,7 @@
 ---
 name: project-surveyor
 description: Runs one concern-scoped, read-only survey pass over a live Chromatik project via the chromatik-mcp tools and returns structured findings for the project-profile skill. Dispatched once per concern (structure, color, effects, pattern-modulation, global-modulation, external-control) by /chromatik-learn — never invoke it standalone without a concern.
-tools: mcp__chromatik__get_status, mcp__chromatik__get_project_info, mcp__chromatik__list_channels, mcp__chromatik__get_channel, mcp__chromatik__list_parameters, mcp__chromatik__get_parameter, mcp__chromatik__list_modulations, mcp__chromatik__get_palette, mcp__chromatik__get_views, mcp__chromatik__get_tempo, mcp__chromatik__get_component_doc, mcp__chromatik__describe_model, mcp__chromatik__list_midi_devices, mcp__chromatik__list_midi_mappings, mcp__chromatik__list_midi_surfaces, mcp__chromatik__list_fixtures, mcp__chromatik__get_fixture, mcp__chromatik__get_fixture_format, mcp__chromatik__get_output_map, mcp__chromatik__list_available_patterns, mcp__chromatik__list_available_effects, mcp__chromatik__list_available_modulators, mcp__chromatik__list_available_fixtures, mcp__chromatik__list_snapshots, mcp__chromatik__get_frame
+tools: mcp__chromatik__get_status, mcp__chromatik__get_project_info, mcp__chromatik__list_channels, mcp__chromatik__get_channel, mcp__chromatik__list_parameters, mcp__chromatik__get_parameter, mcp__chromatik__list_modulations, mcp__chromatik__get_palette, mcp__chromatik__get_views, mcp__chromatik__get_tempo, mcp__chromatik__get_component_doc, mcp__chromatik__describe_model, mcp__chromatik__list_midi_devices, mcp__chromatik__list_midi_mappings, mcp__chromatik__list_midi_surfaces, mcp__chromatik__list_midi_templates, mcp__chromatik__list_fixtures, mcp__chromatik__get_fixture, mcp__chromatik__get_fixture_format, mcp__chromatik__get_output_map, mcp__chromatik__list_available_patterns, mcp__chromatik__list_available_effects, mcp__chromatik__list_available_modulators, mcp__chromatik__list_available_fixtures, mcp__chromatik__list_snapshots, mcp__chromatik__get_frame
 model: sonnet
 ---
 
@@ -89,10 +89,13 @@ If `get_status` succeeds, you have live tool access. Proceed with your assigned 
   `LXModulator` directly rather than `LXPeriodicModulator`). Report which instance each
   modulator targets by path so `pattern-modulation` can cross-reference, but do not
   produce per-instance tables yourself — that duplicates `pattern-modulation`'s ground.
-- **external-control** — MIDI devices/surfaces/mappings, OSC receive/transmit state and
-  clock source (`get_tempo`, `get_project_info`). Note explicitly that DAW-side (e.g.
-  Bitwig/Ableton project) mapping is out of reach of any tool here — you can report what
-  the engine receives, not what a DAW intends to send.
+- **external-control** — MIDI devices/surfaces/templates/mappings: call
+  `list_midi_templates` as well as the three other MIDI list tools, and use
+  `list_parameters` on each returned template path to record the named hardware controls
+  it exposes. Also report OSC receive/transmit state and clock source (`get_tempo`,
+  `get_project_info`). Note explicitly that DAW-side (e.g. Bitwig/Ableton project) mapping
+  is out of reach of any tool here — you can report what the engine receives, not what a
+  DAW intends to send.
 
 ## What you return
 

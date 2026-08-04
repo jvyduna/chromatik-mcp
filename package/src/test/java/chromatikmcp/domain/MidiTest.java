@@ -18,6 +18,7 @@ import heronarts.lx.command.LXCommand;
 import heronarts.lx.midi.LXMidiInput;
 import heronarts.lx.midi.MidiControlChange;
 import heronarts.lx.midi.MidiNoteOn;
+import heronarts.lx.midi.template.AkaiMPD218;
 import heronarts.lx.mixer.LXChannel;
 
 class MidiTest extends HeadlessLxTest {
@@ -39,6 +40,59 @@ class MidiTest extends HeadlessLxTest {
     LX lx = newHeadlessLx();
     assertNotNull(Midi.surfaces(lx));
     assertEquals(lx.engine.midi.surfaces.size(), Midi.surfaces(lx).size());
+  }
+
+  @Test
+  void templatesSnapshotIsTotalOnEmpty() {
+    LX lx = newHeadlessLx();
+    assertNotNull(Midi.templates(lx));
+    assertEquals(0, Midi.templates(lx).size());
+  }
+
+  @Test
+  void resolveTemplateClassAcceptsClassTemplateAndDeviceNames() {
+    LX lx = newHeadlessLx();
+
+    assertEquals(AkaiMPD218.class,
+        Midi.resolveTemplateClass(lx, AkaiMPD218.class.getName()));
+    assertEquals(AkaiMPD218.class, Midi.resolveTemplateClass(lx, "AkaiMPD218"));
+    assertEquals(AkaiMPD218.class, Midi.resolveTemplateClass(lx, "Akai MPD218"));
+    assertEquals(AkaiMPD218.class, Midi.resolveTemplateClass(lx, "MPD218"));
+  }
+
+  @Test
+  void resolveTemplateClassRejectsUnknownName() {
+    LX lx = newHeadlessLx();
+
+    Resolve.ResolveException e = assertThrows(Resolve.ResolveException.class,
+        () -> Midi.resolveTemplateClass(lx, "Definitely Not A Controller"));
+    assertEquals(Resolve.Failure.TYPE_MISMATCH, e.failure);
+    assertTrue(e.getMessage().contains(
+        "Akai MPD218 (class=heronarts.lx.midi.template.AkaiMPD218, device=MPD218)"));
+    Resolve.ResolveException repeated = assertThrows(Resolve.ResolveException.class,
+        () -> Midi.resolveTemplateClass(lx, "Definitely Not A Controller"));
+    assertEquals(e.getMessage(), repeated.getMessage(),
+        "registered choices should have deterministic ordering");
+  }
+
+  @Test
+  void addTemplateReturnsAddressableSnapshotAndUndoRemovesIt() {
+    LX lx = newHeadlessLx();
+
+    Midi.TemplateInfo added = Midi.addTemplate(lx, AkaiMPD218.class);
+
+    assertEquals(0, added.index());
+    assertEquals("/lx/midi/template/1", added.path());
+    assertEquals("Akai MPD218", added.name());
+    assertEquals("Akai MPD218", added.label());
+    assertEquals("MPD218", added.deviceName());
+    assertEquals(AkaiMPD218.class.getName(), added.className());
+    assertNotNull(Resolve.parameter(lx, added.path() + "/knob-A1"),
+        "template controls should be addressable through the returned path");
+    assertEquals(added, Midi.templates(lx).get(0));
+
+    lx.command.undo();
+    assertEquals(0, lx.engine.midi.templates.size(), "undo should remove the template");
   }
 
   @Test
