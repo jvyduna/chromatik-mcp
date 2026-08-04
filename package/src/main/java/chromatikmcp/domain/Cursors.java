@@ -132,6 +132,16 @@ public final class Cursors {
       // 1-indexed sugar, the exact inverse of the TEMPO formatLabel: bar/beat positions
       // as a musician reads them off the arrange ruler, resolved against the live
       // beatsPerBar time signature.
+      //
+      // The conversion and its validation are a local duplicate of LX's own
+      // Tempo.triggerBarAndBeat — the formula below is its `(bar-1) * beatsPerBar +
+      // beat - 1`, and the >= 1 checks are its `bar < 1 || beat < 1` guard. Calling
+      // triggerBarAndBeat directly would mutate the live transport, so it is copied
+      // rather than invoked; replace this with the upstream API if LX ever exposes the
+      // conversion as a pure helper. Deliberately NOT rejected here, because upstream
+      // does not: a beat past beatsPerBar (e.g. {bars:1, beats:5} in 4/4) carries into
+      // the next bar. Tightening that is an LX change first, so downstream integrations
+      // can't drift into subtly different bar/beat rules.
       int beatsPerBar = clip.getLX().engine.tempo.beatsPerBar.getValuei();
       long bars = atLeastOne(integral(spec, "bars"), "bars");
       long beats = spec.containsKey("beats") ? atLeastOne(integral(spec, "beats"), "beats") : 1;

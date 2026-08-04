@@ -95,6 +95,28 @@ class CursorsTest extends CompositionTestSupport {
         Cursors.parse(clip, Map.of("bars", 2)));
   }
 
+  /**
+   * The bars/beats conversion is a local duplicate of LX's {@code
+   * Tempo.triggerBarAndBeat} — copied rather than called, since calling it would mutate
+   * the live transport. Both halves of that alignment are pinned here so a well-meaning
+   * "fix" can't quietly fork the bar/beat rules from upstream's.
+   */
+  @Test
+  void barsSugarMatchesUpstreamTriggerBarAndBeatSemantics() {
+    LX lx = newHeadlessLx();
+    LXComposition clip = composition(lx);
+    int beatsPerBar = lx.engine.tempo.beatsPerBar.getValuei();
+
+    // A beat past beatsPerBar carries into the next bar rather than erroring: upstream
+    // applies the same formula with no upper bound, so neither do we.
+    assertEquals((1 - 1) * beatsPerBar + (beatsPerBar + 1 - 1),
+        Cursors.parse(clip, Map.of("bars", 1, "beats", beatsPerBar + 1)).getBeatCount());
+
+    // The lower bound IS upstream's ("Bar and beat must be 1 or greater").
+    parseFailure(clip, Map.of("bars", 0));
+    parseFailure(clip, Map.of("bars", 1, "beats", 0));
+  }
+
   @Test
   void atOriginsReadTheLiveMarkers() {
     LX lx = newHeadlessLx();
